@@ -8,7 +8,13 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from diagnostics import calculate_portfolio_diagnostics
-from database import list_trades, record_trade
+from database import (
+    list_portfolio_snapshots,
+    list_trades,
+    record_trade,
+    upsert_portfolio_snapshot,
+)
+from portfolio import summarize_portfolio
 from storage import initialize_data_files, load_json, save_json
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -74,7 +80,15 @@ async def diagnostics():
         load_json(HOLDINGS_PATH),
         load_json(TREND_PATH),
     )
-    return {"market": market, "funds": rows}
+    summary = summarize_portfolio(rows, config)
+    if rows:
+        upsert_portfolio_snapshot(DATABASE_PATH, summary)
+    return {"market": market, "funds": rows, "portfolio": summary}
+
+
+@app.get("/api/portfolio/history", dependencies=[Depends(require_api_key)])
+def portfolio_history(limit: int = 365):
+    return {"snapshots": list_portfolio_snapshots(DATABASE_PATH, limit=limit)}
 
 
 @app.get("/api/reports/latest", dependencies=[Depends(require_api_key)])

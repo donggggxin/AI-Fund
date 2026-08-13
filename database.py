@@ -29,6 +29,15 @@ CREATE TABLE IF NOT EXISTS trades (
 );
 CREATE INDEX IF NOT EXISTS idx_trades_executed_at ON trades(executed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_fund_code ON trades(fund_code, executed_at DESC);
+CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+    snapshot_date TEXT PRIMARY KEY,
+    captured_at TEXT NOT NULL,
+    total_market_value REAL NOT NULL,
+    total_cost_basis REAL NOT NULL,
+    unrealized_pnl REAL NOT NULL,
+    unrealized_return REAL NOT NULL,
+    estimated_day_change REAL NOT NULL
+);
 """
 
 
@@ -106,3 +115,45 @@ def trades_csv(path):
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue().encode("utf-8-sig")
+
+
+def upsert_portfolio_snapshot(path, summary, captured_at=None):
+    captured_at = captured_at or datetime.now().astimezone().isoformat(timespec="seconds")
+    snapshot_date = captured_at[:10]
+    values = (
+        snapshot_date,
+        captured_at,
+        summary["total_market_value"],
+        summary["total_cost_basis"],
+        summary["unrealized_pnl"],
+        summary["unrealized_return"],
+        summary["estimated_day_change"],
+    )
+    with connect_database(path) as connection:
+        connection.execute(
+            """INSERT INTO portfolio_snapshots (
+                snapshot_date, captured_at, total_market_value, total_cost_basis,
+                unrealized_pnl, unrealized_return, estimated_day_change
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(snapshot_date) DO UPDATE SET
+                captured_at=excluded.captured_at,
+                total_market_value=excluded.total_market_value,
+                total_cost_basis=excluded.total_cost_basis,
+                unrealized_pnl=excluded.unrealized_pnl,
+                unrealized_return=excluded.unrealized_return,
+                estimated_day_change=excluded.estimated_day_change""",
+            values,
+        )
+
+
+def list_portfolio_snapshots(path, limit=365):
+    limit = max(1, min(int(limit), 5000))
+    with connect_database(path) as connection:
+        rows = connection.execute(
+            """SELECT * FROM (
+                SELECT * FROM portfolio_snapshots
+                ORDER BY snapshot_date DESC LIMIT ?
+            ) ORDER BY snapshot_date ASC""",
+            (limit,),
+        ).fetchall()
+    return [dict(row) for row in rows]

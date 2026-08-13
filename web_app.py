@@ -14,9 +14,16 @@ from diagnostics import (
     calculate_portfolio_diagnostics as calculate_shared_diagnostics,
     get_market_status as get_shared_market_status,
 )
-from database import list_trades, record_trade, trades_csv
+from database import (
+    list_portfolio_snapshots,
+    list_trades,
+    record_trade,
+    trades_csv,
+    upsert_portfolio_snapshot,
+)
 from api_client import BackendUnavailable, get_diagnostics
 from fund_import import apply_import, csv_template, normalize_fund_table, read_fund_table
+from portfolio import summarize_portfolio
 from storage import (
     backup_file,
     initialize_data_files,
@@ -415,8 +422,44 @@ with tab_monitor:
         fund_rows, status_str = calculate_portfolio_diagnostics()
         _status_text, _icon, is_m_closed_for_autorefresh = get_market_status()
 
+        current_config = load_json(CONFIG_PATH)
+        portfolio_summary = summarize_portfolio(fund_rows, current_config)
+        if fund_rows:
+            upsert_portfolio_snapshot(DATABASE_PATH, portfolio_summary)
+
         # Time and status is now integrated directly in the main header of the left column
         st.markdown(f"##### 📈 实时跟踪看板 <span style='font-size:0.85rem; font-weight:normal; color:#64748b; margin-left:12px;'>（{status_str}）</span>", unsafe_allow_html=True)
+
+        metric_value, metric_pnl, metric_return, metric_day = st.columns(4)
+        metric_value.metric(
+            "组合市值", f"¥{portfolio_summary['total_market_value']:,.2f}"
+        )
+        metric_pnl.metric(
+            "未实现盈亏", f"¥{portfolio_summary['unrealized_pnl']:,.2f}"
+        )
+        metric_return.metric(
+            "持仓收益率", f"{portfolio_summary['unrealized_return']:.2%}"
+        )
+        metric_day.metric(
+            "今日估算变动", f"¥{portfolio_summary['estimated_day_change']:,.2f}"
+        )
+
+        if portfolio_summary["allocation_by_tag"]:
+            with st.expander("📊 组合配置与收益趋势"):
+                allocation_rows = [
+                    {"标签": tag, "市值": value}
+                    for tag, value in portfolio_summary["allocation_by_tag"].items()
+                ]
+                st.markdown("**标签资产配置**")
+                st.bar_chart(allocation_rows, x="标签", y="市值")
+                snapshots = list_portfolio_snapshots(DATABASE_PATH, limit=365)
+                if len(snapshots) >= 2:
+                    st.markdown("**组合市值历史**")
+                    st.line_chart(
+                        snapshots, x="snapshot_date", y="total_market_value"
+                    )
+                else:
+                    st.caption("组合历史将在不同日期产生快照后显示趋势曲线。")
         
         # Clean Single-line HTML table to prevent markdown parsing glitches
         tr_html = ""
