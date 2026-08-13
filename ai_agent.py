@@ -20,13 +20,16 @@ if sys.platform.startswith('win'):
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from diagnostics import fetch_market_prices, compute_fund_diagnostic, fetch_nav_batch
+from storage import initialize_data_files, save_json
 
 class AIFundAgent:
     def __init__(self):
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.config_path = os.path.join(self.base_dir, "fund_config.json")
-        self.report_path = os.path.join(self.base_dir, "agent_report.md")
-        self.holdings_cache_path = os.path.join(self.base_dir, "holdings_cache.json")
+        self.data_dir = os.getenv("FUND_DATA_DIR", self.base_dir)
+        initialize_data_files(self.data_dir, self.base_dir)
+        self.config_path = os.path.join(self.data_dir, "fund_config.json")
+        self.report_path = os.path.join(self.data_dir, "agent_report.md")
+        self.holdings_cache_path = os.path.join(self.data_dir, "holdings_cache.json")
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -79,8 +82,7 @@ class AIFundAgent:
             self.save_config()
 
     def save_config(self):
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            json.dump(self.config, f, ensure_ascii=False, indent=4)
+        save_json(self.config_path, self.config)
 
     def fetch_fund_history(self, fund_code, page_size=60):
         """Fetch historical NAVs of a mutual fund from Eastmoney"""
@@ -491,7 +493,7 @@ class AIFundAgent:
                 }
 
         # 持久化趋势矩阵，供 web_app.py 等模块读取（含今日估算净值修正后的真实均线）
-        trend_path = os.path.join(self.base_dir, "trend_matrix.json")
+        trend_path = os.path.join(self.data_dir, "trend_matrix.json")
         with open(trend_path, 'w', encoding='utf-8') as f:
             json.dump(trend_matrix, f, ensure_ascii=False, indent=4)
 

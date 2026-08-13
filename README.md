@@ -36,3 +36,24 @@
 - `ai_agent.py`：市场分析与报告生成。
 - `diagnostics.py`：共享的行情和诊断逻辑。
 - `upupup.py`：可选的控制台监控程序。
+
+## Docker 部署（前后端分层）
+
+1. 将 `.env.example` 复制为 `.env`，并替换 `FUND_API_KEY`。
+2. 运行 `docker compose up -d --build`。
+3. 打开 `http://服务器地址:8501`。
+
+部署模式包含两个服务：
+
+- `frontend`：Streamlit 页面，通过内部网络访问后端诊断 API。
+- `backend`：FastAPI 行情与诊断服务，健康检查为 `/api/health`。
+
+运行数据保存在 Docker 命名卷 `fund-data` 中，重建容器不会清空持仓配置。
+本地双击启动时不要求启动 FastAPI，页面会自动使用共享诊断模块降级运行。
+
+开发时也可以分别启动：
+
+```bash
+uvicorn backend.main:app --reload
+API_BASE_URL=http://127.0.0.1:8000 streamlit run web_app.py
+```

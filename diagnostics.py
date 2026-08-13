@@ -9,6 +9,25 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+def get_market_status(config, now=None):
+    """返回 (状态文本, 图标, 是否休市)，供 Web/API/控制台统一使用。"""
+    now = now or datetime.datetime.now()
+    cur_t, today_str = now.time(), now.strftime("%Y-%m-%d")
+    if now.weekday() >= 5 or today_str in config.get("global_holidays", []):
+        return "节假休市", "💤", True
+    if cur_t < datetime.time(9, 30):
+        return "夜间休市", "💤", True
+    if cur_t < datetime.time(11, 30):
+        return "正在开盘", "💰", False
+    if cur_t < datetime.time(13, 0):
+        return "午间休市", "☕", True
+    if cur_t < datetime.time(14, 50):
+        return "正在开盘", "💰", False
+    if cur_t < datetime.time(15, 0):
+        return "决战收盘", "🔥", False
+    return "夜间休市", "💤", True
+
+
 def fetch_market_prices(code_list):
     """从腾讯行情 API 获取股票涨跌幅，返回 {code: change_pct}"""
     if not code_list:
@@ -228,4 +247,56 @@ def compute_fund_diagnostic(
         "main_flow": main_flow,
         "proxy": fb,
         "ma": ma,
+    }
+
+
+def calculate_portfolio_diagnostics(config, holdings_cache, trend_matrix, now=None):
+    """抓取一次行情并用唯一诊断内核计算整个组合。"""
+    now = now or datetime.datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    fund_codes = [
+        key for key in config if key.isdigit() or str(key).startswith("QD")
+    ]
+
+    session = requests.Session()
+    session.headers.update(
+        {"User-Agent": "Mozilla/5.0", "Referer": "http://fundf10.eastmoney.com/"}
+    )
+    nav_cache, nav_date_cache = fetch_nav_batch(session, fund_codes)
+
+    market_codes = set()
+    for code in fund_codes:
+        proxy = config[code].get("proxy")
+        if proxy:
+            market_codes.add(proxy)
+        market_codes.update(stock_code for stock_code, _ in holdings_cache.get(code, []))
+    stock_prices = fetch_market_prices(sorted(market_codes))
+
+    status_text, icon, is_market_closed = get_market_status(config, now)
+    is_trading_day = (
+        now.weekday() < 5
+        and today_str not in config.get("global_holidays", [])
+    )
+    after_close_today = is_trading_day and now.time() >= datetime.time(15, 0)
+    rows = [
+        compute_fund_diagnostic(
+            code,
+            config,
+            nav_cache,
+            nav_date_cache,
+            stock_prices,
+            holdings_cache,
+            trend_matrix,
+            today_str,
+            is_market_closed,
+            after_close_today,
+        )
+        for code in fund_codes
+    ]
+    return rows, {
+        "status": status_text,
+        "icon": icon,
+        "is_market_closed": is_market_closed,
+        "as_of": now.isoformat(timespec="seconds"),
+        "label": f"时间: {now.strftime('%H:%M:%S')} | {icon} {status_text}",
     }

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import sys, time, datetime, json, os, requests, urllib3, unicodedata, re, traceback, io
 
+from storage import initialize_data_files, save_json
+
 if sys.platform.startswith('win'):
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -44,7 +46,9 @@ class UltimateTitanRadarV29:
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': 'Mozilla/5.0', 'Referer': 'http://fundf10.eastmoney.com/'})
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
-        self.config_path = os.path.join(self.base_dir, "fund_config.json")
+        self.data_dir = os.getenv("FUND_DATA_DIR", self.base_dir)
+        initialize_data_files(self.data_dir, self.base_dir)
+        self.config_path = os.path.join(self.data_dir, "fund_config.json")
         
         with open(self.config_path, 'r', encoding='utf-8-sig') as f:
             self.fund_config = json.load(f)
@@ -56,19 +60,19 @@ class UltimateTitanRadarV29:
                 cfg_changed = True
         if cfg_changed: self._save_config()
 
-        self.cost_cache_file = os.path.join(self.base_dir, "cost_cache.json")
+        self.cost_cache_file = os.path.join(self.data_dir, "cost_cache.json")
         self._validate_and_update_costs()
         
         self.nav_cache, self.nav_date_cache = {}, {}
         self.last_stock_prices, self.trend_matrix = {}, {}
         self.holdings_cache = {}
         
-        self.cache_file = os.path.join(self.base_dir, "holdings_cache.json")
+        self.cache_file = os.path.join(self.data_dir, "holdings_cache.json")
         if os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, 'r', encoding='utf-8-sig') as f: self.holdings_cache = json.load(f)
             except: pass
-        self.pred_file = os.path.join(self.base_dir, "prediction_log.json")
+        self.pred_file = os.path.join(self.data_dir, "prediction_log.json")
         self.pred_cache = {}
         if os.path.exists(self.pred_file):
             try:
@@ -77,8 +81,7 @@ class UltimateTitanRadarV29:
 
     def _save_config(self):
         try:
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(self.fund_config, f, ensure_ascii=False, indent=4)
+            save_json(self.config_path, self.fund_config)
         except: pass
 
     def _validate_and_update_costs(self):
@@ -96,7 +99,7 @@ class UltimateTitanRadarV29:
             old_costs[code] = cfg['cost']
             costs_updated = True 
         if costs_updated:
-            with open(self.cost_cache_file, 'w', encoding='utf-8') as f: json.dump(old_costs, f, indent=4)
+            save_json(self.cost_cache_file, old_costs)
 
     def _init_trend_matrix(self):
         print("\n[*] ⚙️ 同步 MA5/10/20/60 趋势分化引擎 (全域均线就绪)...")
@@ -353,7 +356,7 @@ class UltimateTitanRadarV29:
         print("+" + "-" * TOTAL_LINE_WIDTH + "+")
         if snapshot:
             try:
-                with open(self.pred_file, 'w', encoding='utf-8') as f: json.dump(snapshot, f, indent=4)
+                save_json(self.pred_file, snapshot)
             except: pass
             
         return 10 if is_save_time else REFRESH_INTERVAL

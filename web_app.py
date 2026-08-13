@@ -10,6 +10,17 @@ import sys
 import time
 import re
 
+from diagnostics import (
+    calculate_portfolio_diagnostics as calculate_shared_diagnostics,
+    get_market_status as get_shared_market_status,
+)
+from api_client import BackendUnavailable, get_diagnostics
+from storage import (
+    initialize_data_files,
+    load_json as load_json_file,
+    save_json as save_json_file,
+)
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Ensure encoding is safe
@@ -30,10 +41,12 @@ st.set_page_config(
 
 # File Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "fund_config.json")
-REPORT_PATH = os.path.join(BASE_DIR, "agent_report.md")
-HOLDINGS_CACHE_PATH = os.path.join(BASE_DIR, "holdings_cache.json")
-TREND_MATRIX_PATH = os.path.join(BASE_DIR, "trend_matrix.json")
+DATA_DIR = os.getenv("FUND_DATA_DIR", BASE_DIR)
+initialize_data_files(DATA_DIR, BASE_DIR)
+CONFIG_PATH = os.path.join(DATA_DIR, "fund_config.json")
+REPORT_PATH = os.path.join(DATA_DIR, "agent_report.md")
+HOLDINGS_CACHE_PATH = os.path.join(DATA_DIR, "holdings_cache.json")
+TREND_MATRIX_PATH = os.path.join(DATA_DIR, "trend_matrix.json")
 
 # Clean White Theme CSS
 st.markdown("""
@@ -140,40 +153,14 @@ st.markdown("""
 # ----------------------------------------------------
 
 def load_json(path):
-    if os.path.exists(path):
-        try:
-            with open(path, 'r', encoding='utf-8-sig') as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
+    return load_json_file(path)
 
 def save_json(path, data):
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    save_json_file(path, data)
 
 def get_market_status():
     """Determine market status string like upupup.py"""
-    now = datetime.datetime.now()
-    cur_t, today_str = now.time(), now.strftime('%Y-%m-%d')
-    config = load_json(CONFIG_PATH)
-    is_weekend = now.weekday() >= 5
-    holidays = config.get('global_holidays', [])
-    
-    if is_weekend or (today_str in holidays):
-        return "节假休市", "💤", True
-    elif cur_t < datetime.time(9, 30):
-        return "夜间休市", "💤", True
-    elif datetime.time(9, 30) <= cur_t < datetime.time(11, 30):
-        return "正在开盘", "💰", False
-    elif datetime.time(11, 30) <= cur_t < datetime.time(13, 0):
-        return "午间休市", "☕", True
-    elif datetime.time(13, 0) <= cur_t < datetime.time(14, 50):
-        return "正在开盘", "💰", False
-    elif datetime.time(14, 50) <= cur_t < datetime.time(15, 0):
-        return "决战收盘", "🔥", False
-    else:
-        return "夜间休市", "💤", True
+    return get_shared_market_status(load_json(CONFIG_PATH))
 
 def fetch_market_prices(code_list):
     if not code_list:
@@ -213,9 +200,20 @@ def fetch_realtime_fund_flow(proxy_code):
 
 def calculate_portfolio_diagnostics():
     """Calculate and return same values as upupup.py's run_scan"""
+    try:
+        payload = get_diagnostics()
+        return payload["funds"], payload["market"]["label"]
+    except BackendUnavailable:
+        # 本地双击启动或后端短暂不可用时，保持原有可用性。
+        pass
     config = load_json(CONFIG_PATH)
     holdings_cache = load_json(HOLDINGS_CACHE_PATH)
     trend_matrix = load_json(TREND_MATRIX_PATH)
+    rows, market = calculate_shared_diagnostics(
+        config, holdings_cache, trend_matrix
+    )
+    return rows, market["label"]
+    # Legacy implementation retained temporarily below for easy comparison.
     
     today_str = datetime.datetime.now().strftime('%Y-%m-%d')
     
