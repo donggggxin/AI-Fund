@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+.conda-env/
+.conda-pkgs/
 node_modules/
 
 # Local IDE / OS

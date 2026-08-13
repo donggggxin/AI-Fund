@@ -62,3 +62,19 @@
 uvicorn backend.main:app --reload
 API_BASE_URL=http://127.0.0.1:8000 streamlit run web_app.py
 ```
+
+## Conda 开发环境
+
+项目提供 `environment.yml`，可重建 Python 3.12 开发环境：
+
+```bash
+conda env create -f environment.yml
+conda activate ai-fund-dashboard
+python -m unittest discover -s tests -v
+```
+
+当前机器也可以使用项目内隔离环境：
+
+```bash
+conda activate ./.conda-env
+```
