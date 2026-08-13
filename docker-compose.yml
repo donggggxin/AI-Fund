@@ -1,4 +1,14 @@
 services:
+  stock-data:
+    build:
+      context: ./services/stock-data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   backend:
     build:
       context: .
@@ -7,6 +17,8 @@ services:
     environment:
       FUND_DATA_DIR: /app/data
       FUND_API_KEY: ${FUND_API_KEY:-}
+      STOCK_SDK_URL: http://stock-data:3000
+      ELTDX_ENABLED: ${ELTDX_ENABLED:-1}
     volumes:
       - fund-data:/app/data
     healthcheck:
@@ -14,6 +26,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    depends_on:
+      stock-data:
+        condition: service_healthy
 
   frontend:
     build:

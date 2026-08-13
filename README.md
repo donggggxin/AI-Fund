@@ -47,6 +47,11 @@
 
 - `frontend`：Streamlit 页面，通过内部网络访问后端诊断 API。
 - `backend`：FastAPI 行情与诊断服务，健康检查为 `/api/health`。
+- `stock-data`：基于 `stock-sdk` 的内部 Node.js 行情服务，优先提供 A 股/ETF 批量行情；不可用时 Python 后端自动回退到原腾讯接口。
+
+后端行情采用多源降级顺序：`eltdx → stock-sdk → 腾讯直连`。其中 `eltdx`
+仅允许个人学习、协议研究和非商业研究，不能用于商业或收费服务；可通过
+`.env` 中的 `ELTDX_ENABLED=0` 关闭。
 
 运行数据保存在 Docker 命名卷 `fund-data` 中，重建容器不会清空持仓配置。
 本地双击启动时不要求启动 FastAPI，页面会自动使用共享诊断模块降级运行。

@@ -1,8 +1,15 @@
 import datetime
+import sys
+import types
 import unittest
 from unittest.mock import patch
 
-from diagnostics import compute_fund_diagnostic, get_market_status
+from diagnostics import (
+    compute_fund_diagnostic,
+    fetch_market_prices_from_eltdx,
+    fetch_market_prices_from_stock_sdk,
+    get_market_status,
+)
 
 
 class MarketStatusTests(unittest.TestCase):
@@ -18,6 +25,35 @@ class MarketStatusTests(unittest.TestCase):
 
 
 class DiagnosticTests(unittest.TestCase):
+    @patch.dict("os.environ", {"ELTDX_ENABLED": "1"})
+    def test_eltdx_percent_is_normalized(self):
+        quote = types.SimpleNamespace(full_code="sh588000", change_pct=1.5)
+
+        class FakeClient:
+            def __init__(self, **_kwargs): pass
+            def __enter__(self): return self
+            def __exit__(self, *_args): pass
+            def get_quote(self, _symbols): return [quote]
+
+        fake_module = types.SimpleNamespace(TdxClient=FakeClient)
+        with patch.dict(sys.modules, {"eltdx": fake_module}):
+            self.assertEqual(
+                fetch_market_prices_from_eltdx(["sh588000"]),
+                {"sh588000": 0.015},
+            )
+
+    @patch.dict("os.environ", {"STOCK_SDK_URL": "http://stock-data:3000"})
+    @patch("diagnostics.requests.post")
+    def test_stock_sdk_percent_is_normalized(self, request_post):
+        request_post.return_value.raise_for_status.return_value = None
+        request_post.return_value.json.return_value = {
+            "quotes": [{"symbol": "sh588000", "changePercent": 2.5}]
+        }
+        self.assertEqual(
+            fetch_market_prices_from_stock_sdk(["sh588000"]),
+            {"sh588000": 0.025},
+        )
+
     @patch("diagnostics.fetch_realtime_fund_flow", return_value=None)
     @patch("diagnostics.requests.get")
     def test_drop_signal_respects_space_lock(self, request_get, _flow):

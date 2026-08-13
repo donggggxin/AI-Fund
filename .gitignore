@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+node_modules/
 
 # Local IDE / OS
 .DS_Store
@@ -27,4 +28,3 @@ prediction_log.json
 *.log
 *.tmp
 *.bak
-

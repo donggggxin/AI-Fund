@@ -3,6 +3,7 @@
 
 import datetime
 import json
+import os
 import requests
 import urllib3
 
@@ -28,21 +29,75 @@ def get_market_status(config, now=None):
     return "夜间休市", "💤", True
 
 
-def fetch_market_prices(code_list):
-    """从腾讯行情 API 获取股票涨跌幅，返回 {code: change_pct}"""
+def fetch_market_prices_from_stock_sdk(code_list):
+    """从内部 stock-sdk 服务获取行情；SDK 百分数转换为小数比例。"""
+    service_url = os.getenv("STOCK_SDK_URL", "").rstrip("/")
+    if not service_url or not code_list:
+        return {}
+    response = requests.post(
+        f"{service_url}/quotes/cn",
+        json={"symbols": code_list},
+        timeout=10,
+    )
+    response.raise_for_status()
+    result = {}
+    for quote in response.json().get("quotes", []):
+        code = str(quote.get("symbol") or quote.get("code") or "")
+        matched = next((item for item in code_list if item.endswith(code[-6:])), None)
+        if matched and quote.get("changePercent") is not None:
+            result[matched] = float(quote["changePercent"]) / 100.0
+    return result
+
+
+def fetch_market_prices_from_eltdx(code_list):
+    """从通达信协议获取 A股/ETF 行情；不可用时由调用方降级。"""
+    if os.getenv("ELTDX_ENABLED", "1").lower() not in {"1", "true", "yes"}:
+        return {}
     if not code_list:
         return {}
+    from eltdx import TdxClient
+
+    supported = [
+        code for code in code_list if str(code).lower().startswith(("sh", "sz", "bj"))
+    ]
+    if not supported:
+        return {}
+    with TdxClient(timeout=3, heartbeat_interval=None) as client:
+        quotes = client.get_quote(supported)
+    return {
+        quote.full_code: float(quote.change_pct) / 100.0
+        for quote in quotes
+        if quote.change_pct is not None
+    }
+
+
+def fetch_market_prices(code_list):
+    """按 eltdx → stock-sdk → 腾讯直连逐层补齐行情。"""
+    if not code_list:
+        return {}
+    prices = {}
+    try:
+        prices.update(fetch_market_prices_from_eltdx(code_list))
+    except Exception:
+        pass
+    missing_codes = [code for code in code_list if code not in prices]
+    try:
+        prices.update(fetch_market_prices_from_stock_sdk(missing_codes))
+    except (requests.RequestException, ValueError, TypeError):
+        pass
+    missing_codes = [code for code in code_list if code not in prices]
+    if not missing_codes:
+        return prices
     try:
         res = requests.get(
-            f"http://qt.gtimg.cn/q={','.join(code_list)}", timeout=5
+            f"http://qt.gtimg.cn/q={','.join(missing_codes)}", timeout=5
         ).text
-        prices = {}
         for line in res.split("\n"):
             if '="' in line:
                 key = next(
                     (
                         c
-                        for c in code_list
+                        for c in missing_codes
                         if c.endswith(line.split("=")[0].split("_")[-1])
                     ),
                     "",
@@ -51,8 +106,9 @@ def fetch_market_prices(code_list):
                 if key and len(d) > 4 and float(d[4]) > 0:
                     prices[key] = (float(d[3]) - float(d[4])) / float(d[4])
         return prices
-    except:
-        return {}
+    except (requests.RequestException, ValueError, IndexError, json.JSONDecodeError):
+        pass
+    return prices
 
 
 def fetch_realtime_fund_flow(proxy_code):

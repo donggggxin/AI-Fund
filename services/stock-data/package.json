@@ -1,0 +1,16 @@
+{
+  "name": "ai-fund-stock-data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "stock-sdk": "2.4.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
