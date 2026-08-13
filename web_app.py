@@ -15,7 +15,9 @@ from diagnostics import (
     get_market_status as get_shared_market_status,
 )
 from api_client import BackendUnavailable, get_diagnostics
+from fund_import import apply_import, csv_template, normalize_fund_table, read_fund_table
 from storage import (
+    backup_file,
     initialize_data_files,
     load_json as load_json_file,
     save_json as save_json_file,
@@ -727,6 +729,84 @@ with tab_config:
         config_data = load_json(CONFIG_PATH)
         sorted_keys = [k for k in config_data.keys() if (k.isdigit() or k.startswith('QD'))]
         fund_options = {k: f"{k} - {config_data[k]['name']}" for k in sorted_keys}
+
+        with st.expander("📥 批量导入 CSV / XLSX"):
+            st.caption(
+                "必填列：code、name、cost、shares；可选列会使用系统默认值。"
+                "支持中文列名，导入前会预览且不会修改模型配置。"
+            )
+            st.download_button(
+                "⬇️ 下载 CSV 模板",
+                data=csv_template(),
+                file_name="fund_import_template.csv",
+                mime="text/csv",
+                width="stretch",
+            )
+            import_file = st.file_uploader(
+                "选择基金文件",
+                type=["csv", "xlsx"],
+                accept_multiple_files=False,
+                key="fund_batch_import",
+            )
+            duplicate_label = st.radio(
+                "遇到已存在的基金",
+                ["跳过现有基金", "覆盖基金字段"],
+                horizontal=True,
+                key="fund_duplicate_policy",
+            )
+            if import_file is not None:
+                try:
+                    import_frame = read_fund_table(
+                        import_file.getvalue(), import_file.name
+                    )
+                    import_rows, import_errors = normalize_fund_table(import_frame)
+                except Exception as exc:
+                    import_rows, import_errors = [], [str(exc)]
+
+                if import_errors:
+                    st.error("文件校验未通过，尚未修改任何配置。")
+                    for error in import_errors[:30]:
+                        st.write(f"- {error}")
+                    if len(import_errors) > 30:
+                        st.write(f"- 其余 {len(import_errors) - 30} 条错误已省略")
+                elif not import_rows:
+                    st.warning("文件中没有可导入的基金记录。")
+                else:
+                    duplicate_policy = (
+                        "skip" if duplicate_label == "跳过现有基金" else "overwrite"
+                    )
+                    preview_rows = []
+                    for row in import_rows:
+                        preview = dict(row)
+                        exists = row["code"] in config_data
+                        preview["导入动作"] = (
+                            "跳过" if exists and duplicate_policy == "skip"
+                            else ("覆盖" if exists else "新增")
+                        )
+                        preview_rows.append(preview)
+                    st.markdown(f"**校验通过：{len(import_rows)} 条记录**")
+                    st.dataframe(preview_rows, width="stretch", hide_index=True)
+
+                    if st.button(
+                        "✅ 确认批量导入",
+                        type="primary",
+                        width="stretch",
+                        key="confirm_fund_batch_import",
+                    ):
+                        new_config, summary = apply_import(
+                            config_data, import_rows, duplicate_policy
+                        )
+                        backup_path = backup_file(CONFIG_PATH)
+                        save_json(CONFIG_PATH, new_config)
+                        st.success(
+                            f"导入完成：新增 {len(summary['added'])}，"
+                            f"覆盖 {len(summary['overwritten'])}，"
+                            f"跳过 {len(summary['skipped'])}。"
+                        )
+                        if backup_path:
+                            st.caption(f"原配置已备份：{backup_path.name}")
+                        time.sleep(1)
+                        st.rerun()
         
         # Mode selector: Edit or Add
         mode = st.radio("模式", ["修改现有基金", "添加新基金"], horizontal=True, label_visibility="collapsed")

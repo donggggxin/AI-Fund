@@ -3,6 +3,8 @@
 import json
 import os
 import tempfile
+import datetime
+import shutil
 from pathlib import Path
 
 
@@ -55,3 +57,14 @@ def initialize_data_files(data_dir, template_dir):
         report_path.write_text(
             "# AI 智能诊断报告\n\n尚未生成报告。\n", encoding="utf-8"
         )
+
+
+def backup_file(path):
+    """为现有状态文件创建带时间戳的同目录备份。"""
+    path = Path(path)
+    if not path.exists():
+        return None
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    backup_path = path.with_name(f"{path.name}.{stamp}.bak")
+    shutil.copy2(path, backup_path)
+    return backup_path
