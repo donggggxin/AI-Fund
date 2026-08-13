@@ -21,6 +21,7 @@ from database import (
     trades_csv,
     upsert_portfolio_snapshot,
 )
+from daily_advice import build_daily_advice
 from api_client import BackendUnavailable, get_diagnostics
 from fund_import import apply_import, csv_template, normalize_fund_table, read_fund_table
 from portfolio import summarize_portfolio
@@ -443,6 +444,44 @@ with tab_monitor:
         metric_day.metric(
             "今日估算变动", f"¥{portfolio_summary['estimated_day_change']:,.2f}"
         )
+
+        market_status, market_icon, market_closed = get_shared_market_status(current_config)
+        daily_guide = build_daily_advice(
+            fund_rows,
+            current_config,
+            {
+                "status": market_status,
+                "icon": market_icon,
+                "is_market_closed": market_closed,
+                "as_of": datetime.datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+        st.markdown("##### 🧭 今日投资行动指南（新手版）")
+        if market_closed:
+            st.info(daily_guide["headline"])
+        elif daily_guide["action_counts"].get("减仓"):
+            st.warning(daily_guide["headline"])
+        else:
+            st.success(daily_guide["headline"])
+        st.caption(
+            f"市场：{daily_guide['market_status']} ｜ 阶段：{daily_guide['market_stage']} ｜ "
+            f"数据时点：{daily_guide['as_of'].replace('T', ' ')}"
+        )
+        st.write(daily_guide["today_plan"])
+        with st.expander("查看每只基金的建议、原因与原理", expanded=True):
+            for advice in daily_guide["items"]:
+                st.markdown(
+                    f"**{advice['action']}｜{advice['name']}（{advice['code']}）**  "
+                    f"\n{advice['action_detail']}"
+                )
+                st.markdown("原因：" + "；".join(advice["reasons"]))
+                st.markdown("原理：" + advice["principle"])
+                st.caption("操作前确认：" + "；".join(advice["checklist"]))
+                st.divider()
+        with st.expander("新手必须先知道的 3 条规则"):
+            for rule in daily_guide["beginner_rules"]:
+                st.markdown(f"- {rule}")
+            st.caption(daily_guide["disclaimer"])
 
         if portfolio_summary["allocation_by_tag"]:
             with st.expander("📊 组合配置与收益趋势"):

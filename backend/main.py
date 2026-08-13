@@ -14,6 +14,7 @@ from database import (
     record_trade,
     upsert_portfolio_snapshot,
 )
+from daily_advice import build_daily_advice
 from portfolio import summarize_portfolio
 from storage import initialize_data_files, load_json, save_json
 
@@ -84,6 +85,18 @@ async def diagnostics():
     if rows:
         upsert_portfolio_snapshot(DATABASE_PATH, summary)
     return {"market": market, "funds": rows, "portfolio": summary}
+
+
+@app.get("/api/advice/today", dependencies=[Depends(require_api_key)])
+async def today_advice():
+    config = load_config()
+    rows, market = await asyncio.to_thread(
+        calculate_portfolio_diagnostics,
+        config,
+        load_json(HOLDINGS_PATH),
+        load_json(TREND_PATH),
+    )
+    return build_daily_advice(rows, config, market)
 
 
 @app.get("/api/portfolio/history", dependencies=[Depends(require_api_key)])
