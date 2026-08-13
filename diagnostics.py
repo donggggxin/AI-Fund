@@ -1,0 +1,231 @@
+# -*- coding: utf-8 -*-
+"""共享诊断逻辑模块 -- 供 ai_agent.py / web_app.py / upupup.py 复用"""
+
+import datetime
+import json
+import requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+def fetch_market_prices(code_list):
+    """从腾讯行情 API 获取股票涨跌幅，返回 {code: change_pct}"""
+    if not code_list:
+        return {}
+    try:
+        res = requests.get(
+            f"http://qt.gtimg.cn/q={','.join(code_list)}", timeout=5
+        ).text
+        prices = {}
+        for line in res.split("\n"):
+            if '="' in line:
+                key = next(
+                    (
+                        c
+                        for c in code_list
+                        if c.endswith(line.split("=")[0].split("_")[-1])
+                    ),
+                    "",
+                )
+                d = line.split('"')[1].split("~")
+                if key and len(d) > 4 and float(d[4]) > 0:
+                    prices[key] = (float(d[3]) - float(d[4])) / float(d[4])
+        return prices
+    except:
+        return {}
+
+
+def fetch_realtime_fund_flow(proxy_code):
+    """获取当天的资金净流入 (单位: 万元)"""
+    if not proxy_code:
+        return None
+    try:
+        market = "1" if proxy_code.startswith("sh") else "0"
+        code = proxy_code[2:]
+        secid = f"{market}.{code}"
+        url = (
+            f"http://push2.eastmoney.com/api/qt/stock/fflow/kline/get"
+            f"?lmt=1&klt=101&secid={secid}&fields1=f1,f2,f3,f7"
+            f"&fields2=f51,f52,f53,f54,f55,f56"
+        )
+        res = requests.get(url, timeout=4, verify=False).json()
+        if res.get("rc") == 0 and res.get("data") and res["data"].get("klines"):
+            parts = res["data"]["klines"][0].split(",")
+            if len(parts) >= 6:
+                return float(parts[1]) / 10000.0
+    except:
+        pass
+    return None
+
+
+def fetch_nav_batch(session, fund_codes):
+    """批量抓取基金最新净值，返回 (nav_cache, nav_date_cache)"""
+    nav_cache, nav_date_cache = {}, {}
+    for code in fund_codes:
+        try:
+            url = (
+                f"http://api.fund.eastmoney.com/f10/lsjz"
+                f"?fundCode={code}&pageIndex=1&pageSize=1"
+            )
+            res = session.get(url, timeout=3, verify=False).json()
+            if res.get("Data") and res["Data"].get("LSJZList"):
+                nav_cache[code] = float(res["Data"]["LSJZList"][0]["DWJZ"])
+                nav_date_cache[code] = res["Data"]["LSJZList"][0]["FSRQ"]
+        except:
+            pass
+    return nav_cache, nav_date_cache
+
+
+def compute_fund_diagnostic(
+    code,
+    config,
+    nav_cache,
+    nav_date_cache,
+    stock_prices,
+    holdings_cache,
+    trend_matrix,
+    today_str,
+    is_market_closed,
+    after_close_today=False,
+):
+    """返回单只基金的完整诊断信息
+    after_close_today: 今天是交易日且当前时间已过15:00收盘（但净值尚未公布），
+                       此时仍需叠加当日涨跌幅估算，避免收益率回退到前一日。
+    """
+    cfg = config[code]
+    strat = {
+        "tag": cfg.get("tag", "默认"),
+        "drop": cfg.get("drop", -0.015),
+        "gap": cfg.get("gap", 0.02),
+        "cap": cfg.get("cap", 200),
+        "tp": cfg.get("tp", 0.10),
+        "ratio": cfg.get("ratio", 0.50),
+        "tp_ma": cfg.get("tp_ma", 20),
+    }
+
+    # --- v_pure: 归一动能 (持仓穿透) ---
+    h = holdings_cache.get(code, [])
+    e_contrib, sw_sum = 0.0, 0.0
+    for sc, wt in h:
+        if sc in stock_prices:
+            e_contrib += stock_prices[sc] * wt
+            sw_sum += wt
+    fb = cfg.get("proxy")
+    if fb and fb in stock_prices:
+        v_pure = e_contrib + stock_prices[fb] * max(0.0, 1.0 - sw_sum)
+    elif sw_sum > 0:
+        v_pure = e_contrib
+    else:
+        v_pure = None
+
+    # --- v_off: 官方估算 ---
+    try:
+        r = requests.get(
+            f"http://fundgz.1234567.com.cn/js/{code}.js", timeout=2
+        ).text
+        v_off = (
+            float(json.loads(r[r.find("{") : r.rfind("}") + 1])["gszzl"]) / 100
+        )
+    except:
+        v_off = None
+
+    # --- v_hyb: 严谨终值 ---
+    v_hyb = v_pure if v_pure is not None else (v_off if v_off is not None else 0.0)
+
+    # --- est_nav & h_yield ---
+    base = nav_cache.get(code, cfg["cost"])
+    is_today_updated = nav_date_cache.get(code) == today_str
+
+    # 估算逻辑：
+    # - 净值已公布：直接用实际值
+    # - 盘中 / 收盘后净值未出：base * (1 + v_hyb) 叠加当日涨跌
+    # - 非交易日 / 开盘前：base 已是最近收盘净值，不叠加（避免重复计算）
+    if is_today_updated:
+        est_nav = base
+    elif not is_market_closed or after_close_today:
+        est_nav = base * (1 + v_hyb)
+    else:
+        est_nav = base
+
+    h_yield = (est_nav - cfg["cost"]) / cfg["cost"]
+
+    # --- diag: 诊断建议 ---
+    ma = trend_matrix.get(code, {"MA5": 0, "MA10": 0, "MA20": 0, "MA60": 0})
+    last_p = cfg.get("last_replenish_price", cfg.get("cost", est_nav))
+    target_ma_val = ma.get(f"MA{strat['tp_ma']}", 0)
+
+    is_silenced = False
+    days_passed = 0
+    if "last_sell_date" in cfg:
+        try:
+            last_sell_date = datetime.datetime.strptime(
+                cfg["last_sell_date"], "%Y-%m-%d"
+            ).date()
+            days_passed = (datetime.date.today() - last_sell_date).days
+            if days_passed < 10 and h_yield >= (strat["tp"] - 0.05):
+                is_silenced = True
+        except:
+            pass
+
+    diag = "[巡航中]"
+    if is_market_closed:
+        diag = "[休市]"
+    else:
+        if h_yield >= strat["tp"]:
+            if is_silenced:
+                diag = f"[止盈静默, 剩余{10 - days_passed}天]"
+            else:
+                if target_ma_val > 0 and est_nav > target_ma_val:
+                    diag = f"极强(MA{strat['tp_ma']}护航)"
+                elif target_ma_val > 0 and est_nav <= target_ma_val:
+                    if strat["tag"] == "救援":
+                        diag = "救援结束! 建议清仓"
+                    else:
+                        diag = f"破MA{strat['tp_ma']}! 建议卖{strat['ratio']*100:.0f}%"
+                else:
+                    diag = "达标! 等待均线确认"
+
+        elif v_hyb <= strat["drop"]:
+            p_gap = (est_nav - last_p) / last_p
+            if p_gap > -strat["gap"]:
+                diag = f"空间锁拦截({p_gap:+.1%})"
+            elif (
+                strat["tag"] == "周期"
+                and ma.get("MA60", 0) > 0
+                and est_nav < ma["MA60"]
+            ):
+                diag = "破位! 观望为上"
+            elif strat["tag"] == "限购":
+                diag = "限购暂停"
+            else:
+                val = cfg.get("shares", 0) * est_nav
+                bonus = 1.0 + (abs(min(0, h_yield)) // 0.05) * 0.3
+                buy_amt = (
+                    int(val * abs(v_hyb) * cfg.get("multiplier", 1.5) * bonus)
+                    if val > 0
+                    else 500
+                )
+                diag = f"狙击补仓 +{min(max(50, buy_amt), strat['cap'])}元"
+        elif h_yield < -0.12:
+            diag = "深度被套(等信号)"
+
+    # --- main_flow: 实时主力资金 ---
+    main_flow = fetch_realtime_fund_flow(fb) if fb else None
+
+    return {
+        "code": code,
+        "name": cfg["name"],
+        "cost": cfg["cost"],
+        "shares": cfg.get("shares", 0),
+        "est_nav": est_nav,
+        "v_pure": v_pure,
+        "v_off": v_off,
+        "v_hyb": v_hyb,
+        "h_yield": h_yield,
+        "tp": strat["tp"],
+        "diag": diag,
+        "main_flow": main_flow,
+        "proxy": fb,
+        "ma": ma,
+    }

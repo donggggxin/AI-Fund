@@ -1,0 +1,34 @@
+{
+    "_字段说明_": {
+        "name": "基金名称",
+        "tag": "性格标签 (科创/海外/红利/黄金/周期/救援/限购)",
+        "cost": "持仓成本价",
+        "shares": "当前持有总份额",
+        "proxy": "场内ETF代理代码 (用于计算盘中实时动能)",
+        "multiplier": "补仓金额放大乘数",
+        "daily_invest": "每日定投金额 (元)",
+        "last_replenish_price": "上次补仓/买入时的净值",
+        "drop": "单日暴跌触发线，例如 -0.025 表示跌超 2.5%",
+        "gap": "空间锁拦截线，例如 0.030 表示需比上次买入价低 3%",
+        "cap": "单日单次补仓金额上限 (元)",
+        "tp": "止盈达标线",
+        "ratio": "破位后的卖出比例",
+        "tp_ma": "逃顶护航均线，可选 5/10/20"
+    },
+    "global_holidays": [],
+    "ai_agent_settings": {
+        "llm_provider": "deepseek",
+        "api_key": "",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+        "enable_llm": false,
+        "daily_invest_scales": {
+            "AI主升浪": 1.0,
+            "高位震荡": 0.8,
+            "回调期": 1.5,
+            "趋势破坏": 0.0
+        },
+        "last_market_stage": "",
+        "last_analysis_date": ""
+    }
+}

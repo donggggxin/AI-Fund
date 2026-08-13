@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Personal portfolio configuration and runtime data
+fund_config.json
+agent_report.md
+holdings_cache.json
+trend_matrix.json
+cost_cache.json
+prediction_log.json
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
