@@ -30,3 +30,6 @@ prediction_log.json
 *.log
 *.tmp
 *.bak
+*.db
+*.db-shm
+*.db-wal

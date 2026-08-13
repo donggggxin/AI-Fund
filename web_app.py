@@ -14,6 +14,7 @@ from diagnostics import (
     calculate_portfolio_diagnostics as calculate_shared_diagnostics,
     get_market_status as get_shared_market_status,
 )
+from database import list_trades, record_trade, trades_csv
 from api_client import BackendUnavailable, get_diagnostics
 from fund_import import apply_import, csv_template, normalize_fund_table, read_fund_table
 from storage import (
@@ -49,6 +50,7 @@ CONFIG_PATH = os.path.join(DATA_DIR, "fund_config.json")
 REPORT_PATH = os.path.join(DATA_DIR, "agent_report.md")
 HOLDINGS_CACHE_PATH = os.path.join(DATA_DIR, "holdings_cache.json")
 TREND_MATRIX_PATH = os.path.join(DATA_DIR, "trend_matrix.json")
+DATABASE_PATH = os.path.join(DATA_DIR, "fund_dashboard.db")
 
 # Clean White Theme CSS
 st.markdown("""
@@ -502,7 +504,8 @@ with tab_monitor:
                 # Expandable booking form
                 with st.expander(f"🛒 登记执行这笔买入 ({r['name']})"):
                     actual_nav = st.number_input("实际成交净值", min_value=0.0001, value=float(r['est_nav']), format="%.4f", key=f"nav_b_{code}")
-                    actual_amt = st.number_input("实际买入金额(元)", min_value=0.0, value=float(buy_amt), step=50.0, key=f"amt_b_{code}")
+                    actual_amt = st.number_input("实际买入金额(元)", min_value=0.01, value=float(buy_amt), step=50.0, key=f"amt_b_{code}")
+                    actual_fee = st.number_input("申购费用(元)", min_value=0.0, value=0.0, step=0.1, key=f"fee_b_{code}")
                     
                     if st.button("💾 确认交易并自动更新持仓与均价", key=f"btn_b_{code}"):
                         config_data = load_json(CONFIG_PATH)
@@ -515,7 +518,7 @@ with tab_monitor:
                         new_total_shares = old_shares + new_shares
                         
                         if new_total_shares > 0:
-                            new_cost = (old_cost * old_shares + actual_amt) / new_total_shares
+                            new_cost = (old_cost * old_shares + actual_amt + actual_fee) / new_total_shares
                         else:
                             new_cost = old_cost
                             
@@ -526,6 +529,19 @@ with tab_monitor:
                         cfg['last_replenish_date'] = datetime.datetime.now().strftime('%Y-%m-%d')
                         
                         save_json(CONFIG_PATH, config_data)
+                        record_trade(
+                            DATABASE_PATH,
+                            fund_code=code,
+                            fund_name=cfg.get('name', code),
+                            side="BUY",
+                            nav=actual_nav,
+                            shares=new_shares,
+                            gross_amount=actual_amt,
+                            fee=actual_fee,
+                            source="web",
+                            position_shares_after=cfg['shares'],
+                            cost_after=cfg['cost'],
+                        )
                         st.success(f"加仓记账成功！更新后份额: {cfg['shares']}，更新后均价成本: {cfg['cost']}")
                         
             # Detect Selling Advice
@@ -551,7 +567,8 @@ with tab_monitor:
                 # Expandable booking form
                 with st.expander(f"🛒 登记执行这笔卖出 ({r['name']})"):
                     actual_nav = st.number_input("实际成交净值", min_value=0.0001, value=float(r['est_nav']), format="%.4f", key=f"nav_s_{code}")
-                    actual_ratio = st.slider("实际卖出比例", min_value=0.0, max_value=1.0, value=float(sell_ratio), step=0.05, key=f"ratio_s_{code}")
+                    actual_ratio = st.slider("实际卖出比例", min_value=0.05, max_value=1.0, value=max(0.05, float(sell_ratio)), step=0.05, key=f"ratio_s_{code}")
+                    actual_fee = st.number_input("赎回费用(元)", min_value=0.0, value=0.0, step=0.1, key=f"fee_s_{code}")
                     
                     if st.button("💾 确认交易并自动减仓记账", key=f"btn_s_{code}"):
                         config_data = load_json(CONFIG_PATH)
@@ -565,6 +582,19 @@ with tab_monitor:
                         cfg['last_sell_date'] = datetime.datetime.now().strftime('%Y-%m-%d')
                         
                         save_json(CONFIG_PATH, config_data)
+                        record_trade(
+                            DATABASE_PATH,
+                            fund_code=code,
+                            fund_name=cfg.get('name', code),
+                            side="SELL",
+                            nav=actual_nav,
+                            shares=sold_shares,
+                            gross_amount=sold_shares * actual_nav,
+                            fee=actual_fee,
+                            source="web",
+                            position_shares_after=cfg['shares'],
+                            cost_after=float(cfg.get('cost', 0)),
+                        )
                         st.success(f"减仓记账成功！剩余持有份额: {cfg['shares']}")
                         
         if pending_trades == 0:
@@ -807,6 +837,34 @@ with tab_config:
                             st.caption(f"原配置已备份：{backup_path.name}")
                         time.sleep(1)
                         st.rerun()
+
+        with st.expander("🧾 交易流水与导出"):
+            recent_trades = list_trades(DATABASE_PATH, limit=200)
+            if recent_trades:
+                display_trades = []
+                for trade in recent_trades:
+                    display_trades.append({
+                        "成交时间": trade["executed_at"],
+                        "基金代码": trade["fund_code"],
+                        "基金名称": trade["fund_name"],
+                        "方向": "买入" if trade["side"] == "BUY" else "卖出",
+                        "净值": trade["nav"],
+                        "份额": trade["shares"],
+                        "成交金额": trade["gross_amount"],
+                        "费用": trade["fee"],
+                        "交易后份额": trade["position_shares_after"],
+                        "来源": trade["source"],
+                    })
+                st.dataframe(display_trades, width="stretch", hide_index=True)
+                st.download_button(
+                    "⬇️ 导出全部交易流水 CSV",
+                    data=trades_csv(DATABASE_PATH),
+                    file_name="fund_transactions.csv",
+                    mime="text/csv",
+                    width="stretch",
+                )
+            else:
+                st.info("尚无交易流水；在监控页面登记买入或卖出后会自动记录。")
         
         # Mode selector: Edit or Add
         mode = st.radio("模式", ["修改现有基金", "添加新基金"], horizontal=True, label_visibility="collapsed")
