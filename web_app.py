@@ -847,8 +847,6 @@ with tab_monitor:
                                     ans = res.json()['candidates'][0]['content']['parts'][0]['text']
                                 else:
                                     ans = format_api_error(res)
-                            if api_key and not ans.startswith("API 呼叫失败") and not ans.startswith("请求出错"):
-                                ans = f"{ans.rstrip()}\n\n{chat_sources}"
                             else:
                                 url = build_chat_completions_url(provider, base_url)
                                 headers["Authorization"] = f"Bearer {api_key}"
@@ -862,6 +860,8 @@ with tab_monitor:
                                     ans = res.json()['choices'][0]['message']['content']
                                 else:
                                     ans = format_api_error(res)
+                            if api_key and not ans.startswith("API 呼叫失败") and not ans.startswith("请求出错"):
+                                ans = f"{ans.rstrip()}\n\n{chat_sources}"
                         except Exception as e:
                             ans = f"请求出错: {e}"
                             
