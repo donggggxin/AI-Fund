@@ -171,6 +171,37 @@ def load_json(path):
 def save_json(path, data):
     save_json_file(path, data)
 
+
+def fetch_fund_setup_data(code):
+    """读取新增基金所需的名称和最新净值，避免用户手工填写。"""
+    try:
+        response = requests.get(
+            f"http://fundgz.1234567.com.cn/js/{code}.js?rt={int(time.time())}",
+            timeout=4,
+        )
+        response.raise_for_status()
+        text = response.text
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("基金行情接口返回格式异常")
+        payload = json.loads(text[start : end + 1])
+        nav = 0.0
+        for candidate in (payload.get("gsz"), payload.get("dwjz")):
+            try:
+                nav = float(candidate)
+            except (TypeError, ValueError):
+                continue
+            if nav > 0:
+                break
+        if nav <= 0:
+            raise ValueError("没有取得有效的基金净值")
+        return {
+            "name": str(payload.get("name") or code).strip() or code,
+            "nav": nav,
+        }
+    except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"暂时无法查询基金 {code} 的最新净值，请稍后重试") from exc
+
 def get_market_status():
     """Determine market status string like upupup.py"""
     return get_shared_market_status(load_json(CONFIG_PATH))
@@ -1012,52 +1043,64 @@ with tab_config:
                     st.rerun()
                     
         elif mode == "添加新基金":
-            st.markdown("###### **➕ 录入新基金基本参数**")
-            new_code = st.text_input("基金代码 (6位数字)", value="", max_chars=6)
-            new_name = st.text_input("基金名称", value="")
-            
+            st.markdown("###### **➕ 添加新基金**")
+            st.caption("只需填写基金代码、持仓成本和当前金额；基金名称、最新净值和份额会自动获取/计算。")
+            new_code = st.text_input("基金代码", value="", max_chars=12).strip().upper()
+
             c_new1, c_new2 = st.columns(2)
             with c_new1:
-                new_cost = st.number_input("持仓成本价", min_value=0.0001, value=1.0000, format="%.4f")
-                new_shares = st.number_input("当前持有份额", min_value=0.0, value=0.00, step=100.0, format="%.2f")
-                new_tag = st.selectbox("基金标签属性", ["科创", "红利", "黄金", "救援", "海外", "周期", "限购"])
+                new_cost = st.number_input(
+                    "持仓成本价（元/份）", min_value=0.0001, value=1.0000, format="%.4f"
+                )
             with c_new2:
-                new_invest = st.number_input("每日基础定投额(元)", value=20, step=5)
-                new_mult = st.number_input("补仓放大乘数", value=1.5, step=0.1, format="%.1f")
-                new_proxy = st.text_input("场内ETF代理代码 (如 sh588200)", value="")
-                
+                new_amount = st.number_input(
+                    "当前金额（元）", min_value=0.01, value=1000.00, step=50.0, format="%.2f"
+                )
+
             if st.button("💾 确认添加新基金", width="stretch"):
-                if not new_code.isdigit() or len(new_code) != 6:
-                    st.error("请输入合法的6位数字基金代码！")
-                elif not new_name:
-                    st.error("请输入基金名称！")
+                if not ((new_code.isdigit() and len(new_code) == 6) or new_code.startswith("QD")):
+                    st.error("请输入合法的6位数字基金代码，或以 QD 开头的代码！")
                 elif new_code in config_data:
                     st.error("该基金代码已存在于配置中！")
                 else:
-                    config_data[new_code] = {
-                        "name": new_name,
-                        "tag": new_tag,
-                        "cost": new_cost,
-                        "shares": new_shares,
-                        "proxy": new_proxy,
-                        "multiplier": new_mult,
-                        "daily_invest": new_invest,
-                        "last_replenish_price": new_cost,
-                        "last_replenish_amount": 0.0,
-                        "last_replenish_date": "",
-                        "drop": -0.025 if new_tag == "科创" else (-0.008 if new_tag == "红利" else -0.01),
-                        "gap": 0.03,
-                        "cap": 500,
-                        "tp": 0.15,
-                        "ratio": 0.33,
-                        "tp_ma": 5,
-                        "base_daily_invest": new_invest,
-                        "base_multiplier": new_mult
-                    }
-                    save_json(CONFIG_PATH, config_data)
-                    st.success(f"新基金 {new_code} - {new_name} 添加成功！")
-                    time.sleep(1)
-                    st.rerun()
+                    try:
+                        setup_data = fetch_fund_setup_data(new_code)
+                        new_shares = round(new_amount / setup_data["nav"], 2)
+                        if new_shares <= 0:
+                            raise ValueError("当前金额计算出的份额无效")
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        new_name = setup_data["name"]
+                        config_data[new_code] = {
+                            "name": new_name,
+                            "tag": "未分类",
+                            "cost": new_cost,
+                            "shares": new_shares,
+                            "proxy": "",
+                            "multiplier": 1.5,
+                            "daily_invest": 20,
+                            "last_replenish_price": new_cost,
+                            "last_replenish_amount": 0.0,
+                            "last_replenish_date": "",
+                            "drop": -0.01,
+                            "gap": 0.03,
+                            "cap": 500,
+                            "tp": 0.15,
+                            "ratio": 0.33,
+                            "tp_ma": 5,
+                            "base_daily_invest": 20,
+                            "base_multiplier": 1.5,
+                            "initial_market_value": round(new_amount, 2),
+                            "initial_nav": setup_data["nav"],
+                        }
+                        save_json(CONFIG_PATH, config_data)
+                        st.success(
+                            f"新基金 {new_code} - {new_name} 添加成功！"
+                            f" 已按净值 {setup_data['nav']:.4f} 自动计算份额 {new_shares:.2f}。"
+                        )
+                        time.sleep(1)
+                        st.rerun()
 
     with col_cfg_right:
         st.markdown("##### 🤖 大模型参数微调")
