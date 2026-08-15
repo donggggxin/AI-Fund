@@ -3,6 +3,8 @@
 import datetime
 import re
 
+from time_utils import beijing_now
+
 
 ACTION_ORDER = {"减仓": 0, "分批买入": 1, "暂停": 2, "观察": 3, "持有": 4, "复盘": 5}
 
@@ -120,7 +122,7 @@ def _fund_advice(row, cfg, is_market_closed):
 
 def build_daily_advice(rows, config, market, now=None):
     """根据诊断结果生成结构化的新手行动指南。"""
-    now = now or datetime.datetime.now()
+    now = now or beijing_now()
     is_closed = bool(market.get("is_market_closed", False))
     stage = config.get("ai_agent_settings", {}).get("last_market_stage", "尚未判断")
     items = [

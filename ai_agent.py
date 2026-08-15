@@ -22,6 +22,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from diagnostics import fetch_market_prices, compute_fund_diagnostic, fetch_nav_batch
 from llm_utils import build_chat_completions_url, build_gemini_url, format_api_error
 from storage import initialize_data_files, save_json
+from time_utils import beijing_now
 
 class AIFundAgent:
     def __init__(self):
@@ -217,7 +218,7 @@ class AIFundAgent:
         print("[*] [AI Agent] AI 科技主线基金投资智能体 - 开始动态扫描诊断...")
         print("="*60)
 
-        today_str = datetime.datetime.now().strftime('%Y-%m-%d')
+        today_str = beijing_now().strftime('%Y-%m-%d')
 
         # 1. 动态发现全部基金和ETF代理
         fund_codes = [k for k in self.config if k.isdigit() or k.startswith('QD')]
@@ -470,7 +471,7 @@ class AIFundAgent:
                 all_stock_codes.add(proxy)
         stock_prices = fetch_market_prices(list(all_stock_codes))
 
-        now = datetime.datetime.now()
+        now = beijing_now()
         cur_t = now.time()
         is_weekend = now.weekday() >= 5
         holidays = self.config.get('global_holidays', [])
@@ -546,7 +547,7 @@ class AIFundAgent:
         fd = data["fund_data"]
         diags = data["fund_diags"]
         updates = data["updates_summary"]
-        today_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        today_str = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
 
         # 行动建议
         action_map = {

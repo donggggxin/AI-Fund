@@ -7,12 +7,14 @@ import os
 import requests
 import urllib3
 
+from time_utils import beijing_now
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def get_market_status(config, now=None):
     """返回 (状态文本, 图标, 是否休市)，供 Web/API/控制台统一使用。"""
-    now = now or datetime.datetime.now()
+    now = now or beijing_now()
     cur_t, today_str = now.time(), now.strftime("%Y-%m-%d")
     if now.weekday() >= 5 or today_str in config.get("global_holidays", []):
         return "节假休市", "💤", True
@@ -308,7 +310,7 @@ def compute_fund_diagnostic(
 
 def calculate_portfolio_diagnostics(config, holdings_cache, trend_matrix, now=None):
     """抓取一次行情并用唯一诊断内核计算整个组合。"""
-    now = now or datetime.datetime.now()
+    now = now or beijing_now()
     today_str = now.strftime("%Y-%m-%d")
     fund_codes = [
         key for key in config if key.isdigit() or str(key).startswith("QD")

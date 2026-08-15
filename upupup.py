@@ -2,6 +2,7 @@
 import sys, time, datetime, json, os, requests, urllib3, unicodedata, re, traceback, io
 
 from storage import initialize_data_files, save_json
+from time_utils import beijing_now
 
 if sys.platform.startswith('win'):
     try:
@@ -134,7 +135,7 @@ class UltimateTitanRadarV29:
                 self.fund_config = json.load(f)
         except Exception as e:
             print(f"[-] AI 智能体评估失败: {e}")
-        today_str = datetime.datetime.now().strftime('%Y-%m-%d')
+        today_str = beijing_now().strftime('%Y-%m-%d')
         for code in self.fund_config.keys():
             if not (code.isdigit() or code.startswith('QD')): continue
             try:
@@ -185,7 +186,7 @@ class UltimateTitanRadarV29:
         except: pass
 
     def run_scan(self):
-        now = datetime.datetime.now()
+        now = beijing_now()
         cur_t, today_str = now.time(), now.strftime('%Y-%m-%d')
         is_weekend = now.weekday() >= 5
         holidays = self.fund_config.get('global_holidays', [])

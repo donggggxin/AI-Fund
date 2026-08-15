@@ -32,6 +32,7 @@ from storage import (
     load_json as load_json_file,
     save_json as save_json_file,
 )
+from time_utils import beijing_now
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -259,7 +260,7 @@ def calculate_portfolio_diagnostics():
     return rows, market["label"]
     # Legacy implementation retained temporarily below for easy comparison.
     
-    today_str = datetime.datetime.now().strftime('%Y-%m-%d')
+    today_str = beijing_now().strftime('%Y-%m-%d')
     
     # 1. Fetch NAV cache
     nav_cache, nav_date_cache = {}, {}
@@ -291,7 +292,7 @@ def calculate_portfolio_diagnostics():
     
     # 3. Compile output
     status_text, icon, is_m_closed = get_market_status()
-    now = datetime.datetime.now()
+    now = beijing_now()
     cur_t = now.time()
     is_trading_day_check = not (now.weekday() >= 5 or today_str in config.get('global_holidays', []))
     after_close_today = is_trading_day_check and cur_t >= datetime.time(15, 0)
@@ -410,7 +411,7 @@ def calculate_portfolio_diagnostics():
             "ma": ma
         })
         
-    return results, f"时间: {datetime.datetime.now().strftime('%H:%M:%S')} | {icon} {status_text}"
+    return results, f"时间: {beijing_now().strftime('%H:%M:%S')} | {icon} {status_text}"
 
 # ----------------------------------------------------
 # 页面构建
@@ -421,7 +422,7 @@ st.markdown('<div class="main-title">🤖 AI 科技主线基金投资智能体</
 
 # Dynamic refresh interval matching upupup.py exactly. The interval is now
 # consumed by a Streamlit fragment, so it no longer reruns the whole page.
-now = datetime.datetime.now()
+now = beijing_now()
 cur_t = now.time()
 is_weekend = now.weekday() >= 5
 config_data = load_json(CONFIG_PATH)
@@ -485,7 +486,7 @@ with tab_monitor:
                 "status": market_status,
                 "icon": market_icon,
                 "is_market_closed": market_closed,
-                "as_of": datetime.datetime.now().isoformat(timespec="seconds"),
+                "as_of": beijing_now().isoformat(timespec="seconds"),
             },
         )
         st.markdown("##### 🧭 今日投资行动指南（新手版）")
@@ -640,7 +641,7 @@ with tab_monitor:
                         cfg['cost'] = round(new_cost, 4)
                         cfg['last_replenish_price'] = round(actual_nav, 4)
                         cfg['last_replenish_amount'] = actual_amt
-                        cfg['last_replenish_date'] = datetime.datetime.now().strftime('%Y-%m-%d')
+                        cfg['last_replenish_date'] = beijing_now().strftime('%Y-%m-%d')
                         
                         save_json(CONFIG_PATH, config_data)
                         record_trade(
@@ -693,7 +694,7 @@ with tab_monitor:
                         new_total_shares = max(0.0, old_shares - sold_shares)
                         
                         cfg['shares'] = round(new_total_shares, 2)
-                        cfg['last_sell_date'] = datetime.datetime.now().strftime('%Y-%m-%d')
+                        cfg['last_sell_date'] = beijing_now().strftime('%Y-%m-%d')
                         
                         save_json(CONFIG_PATH, config_data)
                         record_trade(

@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from time_utils import beijing_now
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS trades (
@@ -69,7 +71,7 @@ def record_trade(
     executed_at=None,
 ):
     trade_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = beijing_now().isoformat(timespec="seconds")
     executed_at = executed_at or now
     values = (
         trade_id, executed_at, str(fund_code), str(fund_name), side,
@@ -118,7 +120,7 @@ def trades_csv(path):
 
 
 def upsert_portfolio_snapshot(path, summary, captured_at=None):
-    captured_at = captured_at or datetime.now().astimezone().isoformat(timespec="seconds")
+    captured_at = captured_at or beijing_now().isoformat(timespec="seconds")
     snapshot_date = captured_at[:10]
     values = (
         snapshot_date,
