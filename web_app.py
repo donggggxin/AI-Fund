@@ -9,6 +9,7 @@ import traceback
 import sys
 import time
 import re
+import html
 
 from diagnostics import (
     calculate_portfolio_diagnostics as calculate_shared_diagnostics,
@@ -63,6 +64,16 @@ HOLDINGS_CACHE_PATH = os.path.join(DATA_DIR, "holdings_cache.json")
 TREND_MATRIX_PATH = os.path.join(DATA_DIR, "trend_matrix.json")
 DATABASE_PATH = os.path.join(DATA_DIR, "fund_dashboard.db")
 
+
+def get_authenticated_user():
+    """读取 Nginx Basic Auth 透传的用户名；本地直连时使用本地用户标识。"""
+    try:
+        headers = st.context.headers
+        username = headers.get("X-Auth-User") or headers.get("x-auth-user")
+    except (AttributeError, RuntimeError):
+        username = None
+    return str(username).strip() if username else "本地用户"
+
 # Clean White Theme CSS
 st.markdown("""
 <style>
@@ -83,6 +94,16 @@ st.markdown("""
         display: flex;
         align-items: center;
         gap: 8px;
+    }
+
+    .user-badge {
+        color: #475569;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 999px;
+        padding: 0.45rem 0.8rem;
+        text-align: center;
+        white-space: nowrap;
     }
     
     /* Table Styling matching console look */
@@ -419,7 +440,18 @@ def calculate_portfolio_diagnostics():
 # ----------------------------------------------------
 
 # Header
-st.markdown('<div class="main-title">🤖 基金投资管理与分析智能体</div>', unsafe_allow_html=True)
+current_user = get_authenticated_user()
+header_left, header_right = st.columns([0.76, 0.24], vertical_alignment="center")
+with header_left:
+    st.markdown('<div class="main-title">🤖 基金投资管理与分析智能体</div>', unsafe_allow_html=True)
+with header_right:
+    st.markdown(
+        f'<div class="user-badge">👤 当前用户：{html.escape(current_user)}</div>',
+        unsafe_allow_html=True,
+    )
+with st.sidebar:
+    st.markdown(f"### 👤 登录信息\n当前用户：**{html.escape(current_user)}**")
+    st.caption("用户认证由部署环境的 Nginx Basic Auth 提供。")
 
 # Dynamic refresh interval matching upupup.py exactly. The interval is now
 # consumed by a Streamlit fragment, so it no longer reruns the whole page.

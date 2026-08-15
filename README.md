@@ -92,6 +92,7 @@ Web 或 FastAPI 登记买卖时，系统会同步追加到 SQLite 交易账本
 公网服务器部署时，前端端口默认只监听 `127.0.0.1:8501`，应通过带身份认证和
 HTTPS 的 Nginx/Caddy 反向代理访问，不要将持仓配置页面直接暴露到公网。
 `deploy/nginx-ai-fund.conf` 提供了 Nginx Basic Auth 反向代理示例。
+该配置会将 Basic Auth 用户名透传给前端，页面右上角和侧边栏会显示当前用户；直接访问 Streamlit 端口时显示“本地用户”。
 
 ## 大模型问答 404 排查
 
