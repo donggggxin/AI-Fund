@@ -71,7 +71,7 @@ class AIFundAgent:
                 "model": "gemini-1.5-flash",
                 "enable_llm": False,
                 "daily_invest_scales": {
-                    "AI主升浪": 1.0,
+                    "强势趋势": 1.0,
                     "高位震荡": 0.8,
                     "回调期": 1.5,
                     "趋势破坏": 0.0
@@ -216,7 +216,7 @@ class AIFundAgent:
 
     def run_analysis(self):
         print("\n" + "="*60)
-        print("[*] [AI Agent] AI 科技主线基金投资智能体 - 开始动态扫描诊断...")
+        print("[*] [AI Agent] 基金投资管理智能体 - 开始动态扫描诊断...")
         print("="*60)
 
         today_str = beijing_now().strftime('%Y-%m-%d')
@@ -373,29 +373,34 @@ class AIFundAgent:
                 stored.pop('_closes', None)
                 stored.pop('_kline_last_date', None)
 
-        # 6. 量化评分 (趋势60 + 回撤30 + 量能10 + 资金流向10 = 110)
+        # 6. 通用组合评分 (趋势60 + 回撤30 + 量能10 + 资金流向10 = 110)
         available_etfs = [s for s in proxy_list if s in etf_data]
 
-        trend_score = 0
+        trend_points = 0
         for sym in available_etfs:
             d = etf_data[sym]
-            if d.get("above_ma20"): trend_score += 10
-            if d.get("above_ma60"): trend_score += 5
+            if d.get("above_ma20"): trend_points += 10
+            if d.get("above_ma60"): trend_points += 5
+        # 以代理标的平均趋势表现计分，基金数量增加不会突破 60 分上限。
+        trend_score = round((trend_points / len(available_etfs)) * 4) if available_etfs else 0
 
-        dd_score = 0
-        nasdaq_dd = abs(market_metrics.get("us.IXIC", {}).get("drawdown", 0))
-        nvda_dd = abs(market_metrics.get("usNVDA", {}).get("drawdown", 0))
-        if nasdaq_dd < 0.05: dd_score += 15
-        elif nasdaq_dd < 0.10: dd_score += 10
-        elif nasdaq_dd < 0.15: dd_score += 5
-        if nvda_dd < 0.08: dd_score += 15
-        elif nvda_dd < 0.15: dd_score += 10
-        elif nvda_dd < 0.25: dd_score += 5
+        drawdowns = [
+            abs(float(etf_data[s].get("drawdown", 0) or 0))
+            for s in available_etfs
+            if etf_data[s].get("price", 0) > 0
+        ]
+        avg_drawdown = sum(drawdowns) / len(drawdowns) if drawdowns else 0.0
+        if avg_drawdown < 0.05: dd_score = 30
+        elif avg_drawdown < 0.10: dd_score = 20
+        elif avg_drawdown < 0.15: dd_score = 10
+        else: dd_score = 5
 
-        vol_score = 0
-        chips_vol = etf_data.get("sh588200", {}).get("volume_ratio", 1.0)
-        if 0.8 <= chips_vol <= 1.5: vol_score = 10
-        elif chips_vol > 0: vol_score = 5
+        volume_ratios = [
+            float(etf_data[s].get("volume_ratio", 1.0) or 1.0)
+            for s in available_etfs
+        ]
+        avg_volume_ratio = sum(volume_ratios) / len(volume_ratios) if volume_ratios else 1.0
+        vol_score = 10 if 0.8 <= avg_volume_ratio <= 1.5 else (5 if avg_volume_ratio > 0 else 0)
 
         # 资金流向评分
         flow_score = 5
@@ -412,7 +417,7 @@ class AIFundAgent:
 
         total_score = trend_score + dd_score + vol_score + flow_score
 
-        if total_score >= 82: market_stage = "AI主升浪"
+        if total_score >= 82: market_stage = "强势趋势"
         elif total_score >= 60: market_stage = "高位震荡"
         elif total_score >= 33: market_stage = "回调期"
         else: market_stage = "趋势破坏"
@@ -557,14 +562,14 @@ class AIFundAgent:
 
         # 行动建议
         action_map = {
-            "AI主升浪": ("持有 + 正常定投", "避免高位追涨，锁仓享受趋势上行"),
+            "强势趋势": ("持有 + 正常定投", "避免高位追涨，按计划持有"),
             "高位震荡": ("持有 + 减压定投", "暂停大额加仓，保留现金，静待方向选择"),
             "回调期": ("加仓 + 放大定投", "均线附近分批低吸，逐步吸纳核心筹码"),
-            "趋势破坏": ("减仓/持有 + 暂停定投", "停止科技定投，防守盘避险，观察均线企稳"),
+            "趋势破坏": ("减仓/持有 + 暂停定投", "控制新增仓位，观察组合代理标的均线企稳"),
         }
         action_desc, action_detail = action_map.get(stage, ("观望", ""))
 
-        # 全球科技指标表
+        # 全球市场参考指标（科技指标只是可选的补充参考）
         us_rows = ""
         for sym in ["usNVDA", "usTSM", "usMSFT", "us.IXIC"]:
             m = mm.get(sym, {})
@@ -619,7 +624,7 @@ class AIFundAgent:
 
         summary_label = f"趋势{data['trend_score']} + 回撤{data['dd_score']} + 量能{data['vol_score']} + 资金{data['flow_score']}"
 
-        local_report = f"""# AI科技主线基金投资智能体决策报告
+        local_report = f"""# 基金投资管理智能体决策报告
 
 **诊断时间**: `{today_str}` | **市场阶段**: **【{stage}】** | **健康得分**: `{score}/110`
 **策略系数**: `{scale:.1f}x` | **建议**: {action_desc}
@@ -628,7 +633,7 @@ class AIFundAgent:
 
 ---
 
-## 全球科技核心指标
+## 市场环境参考指标
 
 | 资产 | 价格 | 52周高 | 高位回撤 | 日涨跌 |
 | :--- | :---: | :---: | :---: | :---: |
@@ -661,12 +666,12 @@ class AIFundAgent:
 | 维度 | 得分 | 满分 | 说明 |
 | :--- | :---: | :---: | :--- |
 | 趋势 | {data['trend_score']} | 60 | ETF代理 x MA20/MA60 |
-| 回撤 | {data['dd_score']} | 30 | 纳指+NVDA高位回撤 |
-| 量能 | {data['vol_score']} | 10 | 科创芯片ETF量比 |
+| 回撤 | {data['dd_score']} | 30 | 组合代理标的平均回撤 |
+| 量能 | {data['vol_score']} | 10 | 组合代理标的平均量比 |
 | 资金流向 | {data['flow_score']} | 10 | 主力净流入占比 |
 | **总分** | **{score}** | **110** | |
 
-阶段阈值: >=82 AI主升浪 | >=60 高位震荡 | >=33 回调期 | <33 趋势破坏
+阶段阈值: >=82 强势趋势 | >=60 高位震荡 | >=33 回调期 | <33 趋势破坏
 
 ---
 *本报告由本地量化引擎驱动。参数仅由本地引擎调整，LLM 提供分析解读。*
@@ -713,7 +718,7 @@ class AIFundAgent:
                 f"收益率={d.get('h_yield', 0)*100:+.2f}%, 信号={d.get('diag', '巡航中')}\n"
             )
 
-        prompt = f"""你是一个专注于AI科技主线的基金投资智能体大模型。
+        prompt = f"""你是一个通用基金投资管理智能体大模型，服务于包含科技、红利、黄金、周期、海外及其他主题基金的组合。
 
 以下是本地量化引擎生成的完整诊断报告（包含实时美股/A股ETF数据、持仓基金诊断、交易信号、评分明细）：
 
@@ -729,7 +734,7 @@ class AIFundAgent:
 请对这份报告进行专业润色和深度解读。要求：
 1. 保持markdown格式，不要删除或修改原有的数据表格和数字。
 2. 重点解读每只基金的"实时信号"含义，结合市场阶段解释为什么会有这个信号。
-3. 结合当前实际数据（NVDA价格/回撤、纳斯达克点位、ETF量比、资金流向等）分析市场，避免空洞的模板化叙述。
+3. 结合当前实际数据（各基金代理标的价格、均线、回撤、量比、资金流向等）分析市场，避免空洞的模板化叙述。
 4. 遵循核心原则：不频繁交易、分批建仓、避免情绪化追高、防守底仓稳固。
 5. 语言专业、冷静，用数据说话。
 6. 涉及外部行情、基金净值或资金流向时，必须在相关段落或报告末尾标注来源名称和可点击链接；不要编造来源链接。
@@ -868,7 +873,7 @@ class AIFundAgent:
             
         print("\n" + "="*60)
         print("[*] 💬 已成功开启 AI 投资智能体对话模式...")
-        print("[*] 您可以针对当前市场、科技板块走势、或者对智能体生成的诊断意见进行提问。")
+        print("[*] 您可以针对当前市场、各类基金走势、或者对智能体生成的诊断意见进行提问。")
         print("[*] 输入 'exit' 或 'quit' 可随时退出对话。")
         print("="*60)
         
@@ -886,9 +891,9 @@ class AIFundAgent:
             {
                 "role": "system",
                 "content": (
-                    "你是一个专注于AI科技主线的基金投资智能体大模型。下面是目前最新的宏观数据及投资诊断报告上下文：\n\n"
+                    "你是一个通用基金投资管理智能体大模型。下面是目前最新的市场数据及投资诊断报告上下文：\n\n"
                     f"{report_content}\n\n"
-                    "请围绕上述报告内容和数据，结合AI科技主线（如Blackwell出货、CoWoS先进封装、HBM4、玻璃基板、全球AI算力Capex军备竞赛等），"
+                    "请围绕上述报告内容和数据，结合各类基金的主题、代理标的、趋势、回撤和资金流向，"
                     "专业、理性、客观地解答用户的疑问。遵循如下核心原则：不频繁交易、分批建仓、避免情绪化追高、防守底仓稳固。用中文回答。"
                 )
             }

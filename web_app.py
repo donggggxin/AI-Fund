@@ -47,7 +47,7 @@ if sys.platform.startswith('win'):
 
 # Page Config
 st.set_page_config(
-    page_title="AI科技主线基金智能体",
+    page_title="基金投资管理智能体",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -419,7 +419,7 @@ def calculate_portfolio_diagnostics():
 # ----------------------------------------------------
 
 # Header
-st.markdown('<div class="main-title">🤖 AI 科技主线基金投资智能体</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🤖 基金投资管理与分析智能体</div>', unsafe_allow_html=True)
 
 # Dynamic refresh interval matching upupup.py exactly. The interval is now
 # consumed by a Streamlit fragment, so it no longer reruns the whole page.
@@ -755,7 +755,7 @@ with tab_monitor:
                     st.markdown(msg["content"])
                     
         # Chat Input
-        if user_prompt := st.chat_input("向 DeepSeek 提问当前主线策略..."):
+        if user_prompt := st.chat_input("向基金投资助手提问当前组合策略..."):
             with chat_container:
                 with st.chat_message("user"):
                     st.markdown(user_prompt)
@@ -810,7 +810,7 @@ with tab_monitor:
                                 {
                                     "role": "system",
                                     "content": (
-                                        "你是一个中文智能助手，默认服务于用户的AI科技主线基金投资看板。"
+                                        "你是一个中文基金投资管理助手，服务于用户的多主题基金组合看板。"
                                         "当用户询问基金、市场、持仓、定投、补仓、止盈或报告相关问题时，"
                                         "优先结合下方投资诊断报告和实盘决策参数回答；"
                                         "当用户询问其他主题时，按通用助手方式正常回答，不要强行转回基金话题。\n\n"
