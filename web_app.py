@@ -856,8 +856,25 @@ with tab_monitor:
                                     "temperature": 0.4
                                 }
                                 res = requests.post(url, json=payload, headers=headers, timeout=40)
+                                fallback_model = None
+                                if (
+                                    res.status_code == 503
+                                    and "model_not_found" in (res.text or "")
+                                    and model_name == "gpt-5.6-terra"
+                                ):
+                                    for candidate in ("gpt-5.5", "gpt-5.6-sol"):
+                                        fallback_payload = {**payload, "model": candidate}
+                                        fallback_res = requests.post(
+                                            url, json=fallback_payload, headers=headers, timeout=40
+                                        )
+                                        if fallback_res.status_code == 200:
+                                            res = fallback_res
+                                            fallback_model = candidate
+                                            break
                                 if res.status_code == 200:
                                     ans = res.json()['choices'][0]['message']['content']
+                                    if fallback_model:
+                                        ans = f"（原模型暂时无可用渠道，已自动切换至 {fallback_model}）\n\n{ans}"
                                 else:
                                     ans = format_api_error(res)
                             if api_key and not ans.startswith("API 呼叫失败") and not ans.startswith("请求出错"):
