@@ -23,6 +23,7 @@ from diagnostics import fetch_market_prices, compute_fund_diagnostic, fetch_nav_
 from llm_utils import build_chat_completions_url, build_gemini_url, format_api_error
 from storage import initialize_data_files, save_json
 from time_utils import beijing_now
+from source_links import build_sources_markdown
 
 class AIFundAgent:
     def __init__(self):
@@ -547,6 +548,11 @@ class AIFundAgent:
         fd = data["fund_data"]
         diags = data["fund_diags"]
         updates = data["updates_summary"]
+        source_md = build_sources_markdown(
+            self.config,
+            fund_codes=fund_codes,
+            market_symbols=list(etf.keys()) + ["usNVDA", "usTSM", "usMSFT", "us.IXIC"],
+        )
         today_str = beijing_now().strftime('%Y-%m-%d %H:%M:%S')
 
         # 行动建议
@@ -664,6 +670,8 @@ class AIFundAgent:
 
 ---
 *本报告由本地量化引擎驱动。参数仅由本地引擎调整，LLM 提供分析解读。*
+
+{source_md}
 """
 
         # LLM润色
@@ -672,7 +680,7 @@ class AIFundAgent:
             try:
                 llm_report = self.call_llm_cognitive_agent(local_report, data)
                 if llm_report:
-                    return llm_report
+                    return f"{llm_report.rstrip()}\n\n{source_md}\n"
             except Exception as e:
                 print(f"[-] LLM调用失败，使用本地报告。错误: {e}")
 
@@ -715,12 +723,16 @@ class AIFundAgent:
 各基金当前决策参数与交易信号:
 {fund_params_snapshot}
 
+本报告允许引用的可访问来源清单:
+{build_sources_markdown(self.config, fund_codes=data['fund_codes'], market_symbols=list(data.get('etf_data', {}).keys()) + ['usNVDA', 'usTSM', 'usMSFT', 'us.IXIC'])}
+
 请对这份报告进行专业润色和深度解读。要求：
 1. 保持markdown格式，不要删除或修改原有的数据表格和数字。
 2. 重点解读每只基金的"实时信号"含义，结合市场阶段解释为什么会有这个信号。
 3. 结合当前实际数据（NVDA价格/回撤、纳斯达克点位、ETF量比、资金流向等）分析市场，避免空洞的模板化叙述。
 4. 遵循核心原则：不频繁交易、分批建仓、避免情绪化追高、防守底仓稳固。
 5. 语言专业、冷静，用数据说话。
+6. 涉及外部行情、基金净值或资金流向时，必须在相关段落或报告末尾标注来源名称和可点击链接；不要编造来源链接。
 
 ## 决策输出要求
 在报告的末尾，你必须附加一个JSON代码块，为每只进攻型基金（tag为"科创"或"海外"）推荐最优的定投金额(daily_invest)和补仓倍数(multiplier)。格式如下：

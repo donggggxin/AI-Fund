@@ -33,6 +33,7 @@ from storage import (
     save_json as save_json_file,
 )
 from time_utils import beijing_now
+from source_links import build_sources_markdown
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -800,6 +801,11 @@ with tab_monitor:
                                         'base_daily_invest': cfg.get('base_daily_invest', 0)
                                     }
 
+                            chat_sources = build_sources_markdown(
+                                config_for_chat,
+                                fund_codes=list(fund_params_summary),
+                            )
+
                             api_messages = [
                                 {
                                     "role": "system",
@@ -811,12 +817,14 @@ with tab_monitor:
                                         "下面是目前最新的投资诊断报告上下文：\n\n"
                                         f"{report_context}\n\n"
                                         f"当前实盘决策参数 (来自系统配置): {json.dumps(fund_params_summary, ensure_ascii=False)}\n\n"
+                                        f"可引用的来源链接清单:\n{chat_sources}\n\n"
                                         "回答规则："
                                         "1. 投资相关问题优先引用当前报告、持仓收益、定投金额、补仓倍数等已知数据，做到'知行合一'。"
                                         "2. 不要编造实时行情、基金净值或配置中不存在的数据；如果上下文不足，要明确说明。"
                                         "3. 投资建议保持谨慎，遵循不频繁交易、分批建仓、避免情绪化追高、防守底仓稳固。"
                                         "4. 非投资问题直接回答用户问题，保持简洁自然。"
-                                        "5. 始终用中文回答。"
+                                        "5. 涉及行情、净值、资金流向或报告结论时，必须在回答末尾增加‘来源’小节，列出实际使用的数据来源和可点击链接；不要编造链接。"
+                                        "6. 始终用中文回答。"
                                     )
                                 }
                             ]
@@ -839,6 +847,8 @@ with tab_monitor:
                                     ans = res.json()['candidates'][0]['content']['parts'][0]['text']
                                 else:
                                     ans = format_api_error(res)
+                            if api_key and not ans.startswith("API 呼叫失败") and not ans.startswith("请求出错"):
+                                ans = f"{ans.rstrip()}\n\n{chat_sources}"
                             else:
                                 url = build_chat_completions_url(provider, base_url)
                                 headers["Authorization"] = f"Bearer {api_key}"
