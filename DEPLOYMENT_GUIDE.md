@@ -1308,3 +1308,397 @@ AI 分析可以把市场概括为主升浪、高位震荡、回调期或趋势�
 
 看板中的红色、绿色、买入、卖出等文字都不构成投资建议。它们是根据你设置的
 规则和公开估算数据生成的教育性提示。最终操作责任仍由账户持有人承担。
+
+## 19. stock-sdk 与 eltdx 的实际接入方式
+
+项目开发时参考并实际接入了以下两个开源项目：
+
+- `stock-sdk`：<https://github.com/chengzuopeng/stock-sdk>
+- `eltdx`：<https://github.com/electkismet/eltdx>
+
+它们不是只写在需求或文档中，而是已经进入依赖、源代码、测试和服务器容器
+运行链路。
+
+### 19.1 为什么需要两个行情项目
+
+基金盘中估值依赖股票和 ETF 行情。如果只依赖单一接口，当接口超时、返回字段
+变化或部分代码缺失时，整个组合可能无法估算。
+
+因此项目采用多行情源逐层补齐：
+
+```text
+需要查询的一组股票/ETF代码
+    |
+    v
+eltdx 批量查询
+    |
+    | 只保留成功返回的代码
+    v
+把缺失代码交给 stock-sdk
+    |
+    | 再次只保留成功返回的代码
+    v
+把仍然缺失的代码交给腾讯行情直连
+    |
+    v
+合并为统一的涨跌比例字典
+```
+
+这称为“降级”或“fallback”。降级不是同时请求所有来源再随意选择，而是先使用
+优先级较高的来源，只对缺失项请求后续来源。
+
+### 19.2 stock-sdk 如何接入
+
+`stock-sdk` 是 Node.js 包，而项目主要后端是 Python。为了保持语言边界清晰，
+项目为它创建了独立的 Node.js 内部微服务。
+
+依赖定义位于：
+
+```text
+services/stock-data/package.json
+services/stock-data/package-lock.json
+```
+
+固定版本为：
+
+```json
+{
+  "dependencies": {
+    "stock-sdk": "2.4.1"
+  }
+}
+```
+
+固定版本可以避免服务器每次构建时自动安装不同版本，降低上游更新造成接口不兼容
+的概率。
+
+服务实现位于：
+
+```text
+services/stock-data/server.js
+```
+
+代码直接导入：
+
+```javascript
+import { StockSDK } from 'stock-sdk';
+```
+
+内部微服务提供两个主要端点：
+
+```text
+GET  /health
+POST /quotes/cn
+```
+
+健康检查用于 Docker 判断服务是否可以接受请求。行情接口接收一批中国市场代码，
+调用 stock-sdk 获取行情，再整理为 Python 后端容易消费的 JSON。
+
+### 19.3 stock-sdk 为什么使用微服务
+
+如果 Python 直接通过子进程调用 Node.js，会产生进程管理、错误捕获和并发问题。
+使用独立服务后，职责更清晰：
+
+```text
+Python 后端：基金诊断、组合计算、数据库和 API
+Node.js 服务：封装 stock-sdk 行情能力
+```
+
+两者通过 HTTP/JSON 通信。这样以后替换 stock-sdk 版本或实现时，不需要重写基金
+诊断核心。
+
+缺点是多了一个需要部署和监控的容器，因此项目为它增加了健康检查和自动重启。
+
+### 19.4 stock-data Docker 容器
+
+镜像定义位于：
+
+```text
+services/stock-data/Dockerfile
+```
+
+核心步骤：
+
+```dockerfile
+FROM node:22-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY server.js ./
+EXPOSE 3000
+CMD ["npm", "start"]
+```
+
+- `node:22-alpine`：使用较小的 Node.js 22 基础镜像。
+- `npm ci`：严格按照 lock 文件安装，适合可重复构建。
+- `--omit=dev`：生产镜像不安装开发依赖。
+- `EXPOSE 3000`：声明服务在容器内使用 3000 端口。
+
+Compose 没有把 3000 映射到公网。它只存在于 Docker 内部网络，降低了攻击面。
+
+### 19.5 Python 后端如何调用 stock-sdk
+
+Compose 为 backend 注入：
+
+```yaml
+STOCK_SDK_URL: http://stock-data:3000
+```
+
+`stock-data` 是 Compose 服务名，也是 Docker 内部 DNS 主机名。
+
+Python 调用函数位于 `diagnostics.py`：
+
+```text
+fetch_market_prices_from_stock_sdk(code_list)
+```
+
+调用过程：
+
+```text
+Python 整理缺失代码
+  -> POST http://stock-data:3000/quotes/cn
+  -> Node.js 调用 stock-sdk
+  -> 返回 JSON 行情
+  -> Python 匹配原始代码
+  -> 把百分数转为小数比例
+```
+
+stock-sdk 返回的 `changePercent` 按百分数表达，例如 `2.5` 表示上涨 2.5%。项目
+内部统一使用小数比例，因此转换为：
+
+```text
+2.5 / 100 = 0.025
+```
+
+如果遗漏这一步，后续基金估值会被放大 100 倍。
+
+### 19.6 eltdx 如何接入
+
+`eltdx` 是 Python 包，因此可以直接由 FastAPI/Python 后端调用，不需要额外语言
+适配服务。
+
+依赖固定在 `requirements.txt`：
+
+```text
+eltdx==1.3.0
+```
+
+调用代码位于 `diagnostics.py`：
+
+```text
+fetch_market_prices_from_eltdx(code_list)
+```
+
+核心调用方式：
+
+```python
+from eltdx import TdxClient
+
+with TdxClient(timeout=3, heartbeat_interval=None) as client:
+    quotes = client.get_quote(supported)
+```
+
+当前只把具有 `sh`、`sz` 或 `bj` 前缀的沪深京市场代码交给 eltdx。其他不支持
+的代码不会强行查询，而是留给后续行情源处理。
+
+eltdx 的涨跌幅同样会转换为项目内部的小数比例：
+
+```text
+quote.change_pct / 100
+```
+
+### 19.7 如何启用或关闭 eltdx
+
+服务器 `.env` 中使用：
+
+```text
+ELTDX_ENABLED=1
+```
+
+关闭时改为：
+
+```text
+ELTDX_ENABLED=0
+```
+
+修改后重新创建后端容器，使环境变量生效：
+
+```bash
+cd /opt/ai-fund
+docker compose up -d --force-recreate backend frontend
+```
+
+关闭 eltdx 后，系统会从 stock-sdk 开始获取行情，并继续保留腾讯直连兜底。
+
+eltdx 使用通达信协议连接外部行情服务器，部署网络可能无法访问相应端口，或者
+连接存在不稳定情况。程序设置了较短超时，并在异常时静默进入下一数据源，避免
+页面被单一连接长时间卡住。
+
+### 19.8 完整行情合并算法
+
+统一入口位于：
+
+```text
+diagnostics.py -> fetch_market_prices(code_list)
+```
+
+逻辑可以简化为：
+
+```python
+prices = {}
+
+prices.update(eltdx成功结果)
+
+missing = 原始代码 - prices已有代码
+prices.update(stock_sdk对missing的成功结果)
+
+missing = 原始代码 - prices已有代码
+prices.update(腾讯接口对missing的成功结果)
+
+return prices
+```
+
+假设需要 10 个代码：
+
+```text
+eltdx 成功返回 7 个
+  -> stock-sdk 只查询剩余 3 个，并成功返回 2 个
+      -> 腾讯接口只查询最后 1 个
+          -> 合并返回最多 10 个结果
+```
+
+这样不会让后面的低优先级来源覆盖前面已经成功获取的数据。
+
+### 19.9 异常处理原则
+
+行情属于外部依赖，常见失败包括：
+
+- 网络超时
+- DNS 或端口不可达
+- 上游接口临时限制
+- 返回 JSON 格式变化
+- 个别代码不存在或停牌
+- 上游服务进程异常
+
+项目的原则是：
+
+```text
+单一来源失败
+  -> 不让整个诊断崩溃
+  -> 尝试下一来源
+  -> 最终仍缺失时使用明确的缺失/零估算状态
+```
+
+这里需要区分“容错”和“准确”。容错保证页面尽可能继续运行，但不能把缺失数据
+变成真实数据。用户仍应关注数据时点和缺失字段。
+
+### 19.10 测试覆盖
+
+Python 测试中验证了百分数归一化：
+
+```text
+tests/test_diagnostics.py
+```
+
+包括：
+
+- eltdx 百分数是否正确除以 100。
+- stock-sdk 百分数是否正确除以 100。
+- 行情变化是否正确进入基金诊断。
+
+Node.js 服务测试位于：
+
+```text
+services/stock-data/server.test.js
+```
+
+本地可执行：
+
+```bash
+cd services/stock-data
+npm test
+```
+
+Python 测试：
+
+```bash
+cd /Users/dx/learning/AI-Fund-Dashboard-Personal
+conda activate ./.conda-env
+python -m unittest discover -s tests -v
+```
+
+### 19.11 服务器上如何确认两者正在工作
+
+查看三个容器：
+
+```bash
+ssh root@47.251.40.104
+cd /opt/ai-fund
+docker compose ps
+```
+
+`ai-fund-stock-data-1` 对应 stock-sdk 服务。理想状态为 `healthy`。
+
+查看 stock-sdk 日志：
+
+```bash
+docker compose logs --tail=200 stock-data
+```
+
+在容器内检查健康端点：
+
+```bash
+docker compose exec stock-data \
+  node -e "fetch('http://localhost:3000/health').then(r=>r.text()).then(console.log)"
+```
+
+确认后端是否启用 eltdx：
+
+```bash
+docker compose exec backend printenv ELTDX_ENABLED
+```
+
+查看 Python 后端日志：
+
+```bash
+docker compose logs --tail=200 backend
+```
+
+需要注意：当前降级逻辑会捕获 eltdx 的连接异常并继续运行，因此日志中没有报错
+不一定表示每次请求都由 eltdx 成功返回。若以后需要精确观察每个请求的数据源，
+可以增加来源统计、耗时和失败次数指标。
+
+### 19.12 当前服务器中的实际状态
+
+本次部署实际启动了：
+
+```text
+ai-fund-frontend-1
+ai-fund-backend-1
+ai-fund-stock-data-1
+```
+
+部署验证时 `stock-data` 和 `backend` 均显示 `healthy`。服务器配置为：
+
+```text
+ELTDX_ENABLED=1
+STOCK_SDK_URL=http://stock-data:3000
+```
+
+因此当前运行链路确实包含 eltdx 和 stock-sdk，不是仅安装未使用。
+
+### 19.13 使用限制与风险
+
+这两个项目以及它们连接的上游数据源都可能更新、限制访问或调整使用条款。
+部署前和升级依赖时应重新检查各自仓库的许可证、README 和数据源使用规则。
+
+尤其需要注意：
+
+- 只应用于个人学习、研究和个人辅助判断。
+- 不应把未经授权的行情数据转售或用于收费数据服务。
+- 不应把估算行情描述为基金公司官方实时净值。
+- 上游仓库更新前先在测试环境验证，不要直接取消版本固定。
+- 行情服务异常时不要依据缺失或延迟数据执行交易。
+
+如果未来把项目改成商业产品，需要重新评估数据授权、许可证、稳定性、合规和
+服务等级，不能直接沿用当前个人研究部署方案。
