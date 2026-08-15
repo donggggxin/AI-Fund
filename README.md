@@ -88,6 +88,10 @@ Web 或 FastAPI 登记买卖时，系统会同步追加到 SQLite 交易账本
 运行数据保存在 Docker 命名卷 `fund-data` 中，重建容器不会清空持仓配置。
 本地双击启动时不要求启动 FastAPI，页面会自动使用共享诊断模块降级运行。
 
+公网服务器部署时，前端端口默认只监听 `127.0.0.1:8501`，应通过带身份认证和
+HTTPS 的 Nginx/Caddy 反向代理访问，不要将持仓配置页面直接暴露到公网。
+`deploy/nginx-ai-fund.conf` 提供了 Nginx Basic Auth 反向代理示例。
+
 开发时也可以分别启动：
 
 ```bash
