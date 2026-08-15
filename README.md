@@ -2,6 +2,9 @@
 
 这是一个在个人电脑本地运行的基金监控看板。每位使用者保存自己的基金配置、持仓数据与 API Key；本分享包不含任何他人的个人数据或密钥。
 
+服务器部署、Git/Docker/Nginx 原理、更新、备份和故障排查详见
+[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)。
+
 ## 首次使用
 
 1. 安装 64 位 Python 3.10 或更新版本：<https://www.python.org/downloads/windows/>。
