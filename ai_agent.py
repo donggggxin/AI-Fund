@@ -20,6 +20,7 @@ if sys.platform.startswith('win'):
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from diagnostics import fetch_market_prices, compute_fund_diagnostic, fetch_nav_batch
+from llm_utils import build_chat_completions_url, build_gemini_url, format_api_error
 from storage import initialize_data_files, save_json
 
 class AIFundAgent:
@@ -689,9 +690,6 @@ class AIFundAgent:
                 base_url = "https://api.deepseek.com"
             if not model or model == 'gemini-1.5-flash':
                 model = "deepseek-chat"
-        if base_url:
-            base_url = base_url.rstrip('/')
-
         stage = data['market_stage']
         score = data['total_score']
 
@@ -741,9 +739,7 @@ class AIFundAgent:
         llm_text = ""
 
         if provider == 'gemini':
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-            if base_url:
-                url = f"{base_url}/v1beta/models/{model}:generateContent?key={api_key}"
+            url = build_gemini_url(base_url, model, api_key)
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0.3}
@@ -752,9 +748,11 @@ class AIFundAgent:
             if res.status_code == 200:
                 result = res.json()
                 llm_text = result['candidates'][0]['content']['parts'][0]['text']
+            else:
+                raise Exception(format_api_error(res))
 
         else:
-            url = f"{base_url}/chat/completions" if base_url else "https://api.openai.com/v1/chat/completions"
+            url = build_chat_completions_url(provider, base_url)
             headers["Authorization"] = f"Bearer {api_key}"
             payload = {
                 "model": model,
@@ -768,6 +766,8 @@ class AIFundAgent:
             if res.status_code == 200:
                 result = res.json()
                 llm_text = result['choices'][0]['message']['content']
+            else:
+                raise Exception(format_api_error(res))
 
         if not llm_text:
             raise Exception(f"API returned status {res.status_code}")
@@ -891,9 +891,6 @@ class AIFundAgent:
                 base_url = "https://api.deepseek.com"
             if not model or model == 'gemini-1.5-flash':
                 model = "deepseek-chat"
-        if base_url:
-            base_url = base_url.rstrip('/')
-
         while True:
             try:
                 user_input = input("\n👤 您: ")
@@ -908,7 +905,7 @@ class AIFundAgent:
                 
                 headers = {"Content-Type": "application/json"}
                 if provider == 'gemini':
-                    url = f"{base_url}/v1beta/models/{model}:generateContent?key={api_key}" if base_url else f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                    url = build_gemini_url(base_url, model, api_key)
                     gemini_contents = []
                     for msg in messages:
                         role = 'model' if msg['role'] == 'assistant' else 'user'
@@ -921,9 +918,9 @@ class AIFundAgent:
                     if res.status_code == 200:
                         ans = res.json()['candidates'][0]['content']['parts'][0]['text']
                     else:
-                        ans = f"API 呼叫失败，状态码: {res.status_code}，响应内容: {res.text}"
+                        ans = format_api_error(res)
                 else:
-                    url = f"{base_url}/chat/completions" if base_url else "https://api.openai.com/v1/chat/completions"
+                    url = build_chat_completions_url(provider, base_url)
                     headers["Authorization"] = f"Bearer {api_key}"
                     payload = {
                         "model": model,
@@ -934,7 +931,7 @@ class AIFundAgent:
                     if res.status_code == 200:
                         ans = res.json()['choices'][0]['message']['content']
                     else:
-                        ans = f"API 呼叫失败，状态码: {res.status_code}，响应内容: {res.text}"
+                        ans = format_api_error(res)
                 
                 # 清除思考中的提示字
                 print(" " * 30, end="\r", flush=True)

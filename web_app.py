@@ -25,6 +25,7 @@ from daily_advice import build_daily_advice
 from api_client import BackendUnavailable, get_diagnostics
 from fund_import import apply_import, csv_template, normalize_fund_table, read_fund_table
 from portfolio import summarize_portfolio
+from llm_utils import build_chat_completions_url, build_gemini_url, format_api_error
 from storage import (
     backup_file,
     initialize_data_files,
@@ -739,9 +740,6 @@ with tab_monitor:
             if provider == 'deepseek':
                 if not base_url: base_url = "https://api.deepseek.com"
                 if not model_name or model_name == 'gemini-1.5-flash': model_name = "deepseek-chat"
-            if base_url:
-                base_url = base_url.rstrip('/')
-                
             with chat_container:
                 with st.chat_message("assistant"):
                     message_placeholder = st.empty()
@@ -795,7 +793,7 @@ with tab_monitor:
                                 
                             headers = {"Content-Type": "application/json"}
                             if provider == 'gemini':
-                                url = f"{base_url}/v1beta/models/{model_name}:generateContent?key={api_key}" if base_url else f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                                url = build_gemini_url(base_url, model_name, api_key)
                                 gemini_contents = []
                                 for msg in api_messages:
                                     role = 'model' if msg['role'] == 'assistant' else 'user'
@@ -808,9 +806,9 @@ with tab_monitor:
                                 if res.status_code == 200:
                                     ans = res.json()['candidates'][0]['content']['parts'][0]['text']
                                 else:
-                                    ans = f"API 呼叫失败: {res.status_code}"
+                                    ans = format_api_error(res)
                             else:
-                                url = f"{base_url}/chat/completions" if base_url else "https://api.openai.com/v1/chat/completions"
+                                url = build_chat_completions_url(provider, base_url)
                                 headers["Authorization"] = f"Bearer {api_key}"
                                 payload = {
                                     "model": model_name,
@@ -821,7 +819,7 @@ with tab_monitor:
                                 if res.status_code == 200:
                                     ans = res.json()['choices'][0]['message']['content']
                                 else:
-                                    ans = f"API 呼叫失败: {res.status_code}"
+                                    ans = format_api_error(res)
                         except Exception as e:
                             ans = f"请求出错: {e}"
                             

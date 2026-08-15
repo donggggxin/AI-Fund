@@ -2,9 +2,6 @@
 
 这是一个在个人电脑本地运行的基金监控看板。每位使用者保存自己的基金配置、持仓数据与 API Key；本分享包不含任何他人的个人数据或密钥。
 
-服务器部署、Git/Docker/Nginx 原理、更新、备份和故障排查详见
-[DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)。
-
 ## 首次使用
 
 1. 安装 64 位 Python 3.10 或更新版本：<https://www.python.org/downloads/windows/>。
@@ -94,6 +91,31 @@ Web 或 FastAPI 登记买卖时，系统会同步追加到 SQLite 交易账本
 公网服务器部署时，前端端口默认只监听 `127.0.0.1:8501`，应通过带身份认证和
 HTTPS 的 Nginx/Caddy 反向代理访问，不要将持仓配置页面直接暴露到公网。
 `deploy/nginx-ai-fund.conf` 提供了 Nginx Basic Auth 反向代理示例。
+
+## 大模型问答 404 排查
+
+问答助手使用 OpenAI 兼容的 `chat/completions` 接口。配置中心的“API 渠道”、
+“Base URL”和“模型名称”必须属于同一个服务商。Base URL 支持以下写法：
+
+- DeepSeek：`https://api.deepseek.com`，程序请求
+  `https://api.deepseek.com/chat/completions`。
+- OpenAI：`https://api.openai.com/v1`，程序请求
+  `https://api.openai.com/v1/chat/completions`。
+- 代理服务：可以填写以 `/v1` 结尾的 API 根地址，也可以直接填写完整的
+  `/chat/completions` endpoint；程序不会重复追加路径。
+
+如果返回 404，优先检查渠道是否和模型匹配、Base URL 是否属于该服务商，以及
+模型名称是否在该服务商账号下可用。页面会显示不含 API Key 的实际接口地址和服务商
+返回内容，便于区分“路径不存在”和“模型不存在”。
+
+修改 Docker 中的 Python 代码后必须重新构建前端镜像：
+
+```bash
+docker compose up -d --build frontend
+```
+
+仅执行 `docker compose restart frontend` 只会重启旧镜像，不会把工作区的新代码复制
+进容器。
 
 开发时也可以分别启动：
 
