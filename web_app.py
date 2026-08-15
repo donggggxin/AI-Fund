@@ -196,30 +196,64 @@ def save_json(path, data):
 
 
 def fetch_fund_setup_data(code):
-    """读取新增基金所需的名称和最新净值，避免用户手工填写。"""
+    """读取新增基金所需的名称和最新净值，实时估值不可用时使用历史净值。"""
     try:
-        response = requests.get(
-            f"http://fundgz.1234567.com.cn/js/{code}.js?rt={int(time.time())}",
-            timeout=4,
-        )
-        response.raise_for_status()
-        text = response.text
-        start, end = text.find("{"), text.rfind("}")
-        if start < 0 or end <= start:
-            raise ValueError("基金行情接口返回格式异常")
-        payload = json.loads(text[start : end + 1])
+        name = str(code)
         nav = 0.0
-        for candidate in (payload.get("gsz"), payload.get("dwjz")):
+
+        # 优先使用实时估值接口。
+        try:
+            response = requests.get(
+                f"http://fundgz.1234567.com.cn/js/{code}.js?rt={int(time.time())}",
+                timeout=4,
+            )
+            response.raise_for_status()
+            text = response.text
+            start, end = text.find("{"), text.rfind("}")
+            if start >= 0 and end > start:
+                payload = json.loads(text[start : end + 1])
+                name = str(payload.get("name") or code).strip() or str(code)
+                candidates = (payload.get("gsz"), payload.get("dwjz"))
+            else:
+                candidates = ()
+        except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError):
+            candidates = ()
+
+        for candidate in candidates:
             try:
                 nav = float(candidate)
             except (TypeError, ValueError):
                 continue
             if nav > 0:
                 break
+
+        # 新基金或部分联接基金没有实时估值时，回退到东方财富基金资料接口。
+        if nav <= 0:
+            response = requests.get(
+                f"https://fund.eastmoney.com/pingzhongdata/{code}.js?v={int(time.time())}",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=6,
+            )
+            response.raise_for_status()
+            text = response.text
+            name_match = re.search(r'var\s+fS_name\s*=\s*"([^"]+)"', text)
+            if name_match:
+                name = name_match.group(1).strip() or name
+            trend_match = re.search(r"Data_netWorthTrend\s*=\s*(\[[\s\S]*?\]);", text)
+            if trend_match:
+                trend = json.loads(trend_match.group(1))
+                for item in reversed(trend):
+                    try:
+                        nav = float(item.get("y"))
+                    except (AttributeError, TypeError, ValueError):
+                        continue
+                    if nav > 0:
+                        break
+
         if nav <= 0:
             raise ValueError("没有取得有效的基金净值")
         return {
-            "name": str(payload.get("name") or code).strip() or code,
+            "name": name,
             "nav": nav,
         }
     except (requests.RequestException, ValueError, TypeError, json.JSONDecodeError) as exc:
